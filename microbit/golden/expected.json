@@ -3,12 +3,13 @@
   "toolchain_id": "mkc-1.3.6",
   "payloads": {
     "hello": {
-      "template_hash": "4cc31a5b0ac4adb3",
-      "program_hash": "f200340042003f00",
+      "hex_sha256": "721178da2536ec27816c3e92b70ba82cb769242b99d030553277f122f5a863a1",
+      "template_hash": "08d9ef69355ad697",
+      "program_hash": "8f007d004500b100",
       "region2_start": 226304,
       "region2_end": 232448,
       "block_count": 96,
-      "region2_sha256": "9cd393ddac647449790867ba89adaa69326da5b6e60835375b418f9c5db4869c"
+      "region2_sha256": "f38b2da60d04a0d5372a286ea4d07bbc07aad7259534b5395e4210e80e25beb6"
     }
   }
 }

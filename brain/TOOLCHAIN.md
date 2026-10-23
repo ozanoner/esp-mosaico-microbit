@@ -14,8 +14,11 @@ validated against; re-record them (and re-bootstrap the micro:bit) if they chang
 
 | payload | template hash | program hash | region 2 | blocks |
 |---|---|---|---|---|
-| `payloads/hello.ts` (rev `A1`) | `4cc31a5b0ac4adb3` | `f200340042003f00` | `0x37400–0x38BFF` (6144 B) | 96 |
-| `payloads/dice.ts` (rev `B2`) | `4cc31a5b0ac4adb3` | `4b004a007d001800` | `0x37400–0x383FF` (4096 B) | 64 |
+| `payloads/hello.ts` (rev `A1`) | `08d9ef69355ad697` | `8f007d004500b100` | `0x37400–0x38BFF` (6144 B) | 96 |
+| `payloads/dice.ts` (rev `B2`) | `08d9ef69355ad697` | `97004300cd003f00` | `0x37400–0x383FF` (4096 B) | 64 |
+
+`hello.hex` sha256: `721178da2536ec27816c3e92b70ba82cb769242b99d030553277f122f5a863a1`.
+These are the values `scripts/verify.sh` enforces (`microbit/golden/expected.json`).
 
 Two things this proves:
 

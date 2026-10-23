@@ -50,6 +50,7 @@ region_bytes = b"".join(data for _, data in blocks)
 
 actual = {
     "toolchain_id": golden["toolchain_id"],
+    "hex_sha256": __import__("hashlib").sha256(open("build/hello.hex", "rb").read()).hexdigest(),
     "template_hash": template_hash.hex(),
     "program_hash": program_hash.hex(),
     "region2_start": start,

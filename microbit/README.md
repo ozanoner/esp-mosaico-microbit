@@ -16,10 +16,20 @@ programs built using MakeCode" — micro:bit partial-flash docs), so all we own 
    proves whether the partial-flash service answers in that mode.
 2. A two-character revision glyph is shown at boot: human-visible proof of which
    build is running, since the Mosaico cannot see the LED matrix.
-3. "No pairing required: anyone can connect via Bluetooth" in Project Settings.
-   **Unverified:** the exact `pxt.json` key that encodes it. The current
-   `"microbit": {"pairing_mode": "none"}` is a placeholder to be confirmed against
-   the editor's project settings implementation before the first real build.
+3. **No pairing, set at build time** — `pxt.json` carries
+
+   ```json
+   "yotta": { "config": { "microbit-dal": { "bluetooth": { "open": 1 } } } }
+   ```
+
+   which the DAL turns into `MICROBIT_BLE_OPEN=1` → `SECURITY_MODE_ENCRYPTION_OPEN_LINK`,
+   no bonding, no whitelist, no advertising timeout
+   (`lancaster-university/microbit-dal/inc/core/MicroBitConfig.h:222-232`).
+
+   This is *verified to reach the build*, not assumed: adding the key moved the
+   template hash from `4cc31a5b0ac4adb3` to `08d9ef69355ad697`, i.e. the DAL is
+   recompiled per project and the setting is live. Whether a central can then
+   write without pairing is the hardware question at gate G2.
 
 ## Bootstrap (once, over USB)
 

@@ -19,6 +19,7 @@ Facts and their sources:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -253,12 +254,14 @@ def _cmd_inspect(path: Path) -> int:
     template_hash, program_hash = image.hashes()
     start, end = image.region2()
     blocks = image.blocks()
+    region_sha = hashlib.sha256(b"".join(data for _, data in blocks)).hexdigest()
     print(f"file            : {path}")
     print(f"dal magic       : 0x{magic:08X}")
     print(f"template hash   : {template_hash.hex()}")
     print(f"program hash    : {program_hash.hex()}")
     print(f"region 2        : 0x{start:08X}–0x{end - 1:08X} ({(end - start)} B)")
     print(f"blocks          : {len(blocks)} × {BLOCK_BYTES} B")
+    print(f"region sha256   : {region_sha}")
     return 0
 
 
