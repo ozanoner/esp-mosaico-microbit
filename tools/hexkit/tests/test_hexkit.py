@@ -61,7 +61,25 @@ def test_region2_start_is_the_magic_and_end_covers_the_data() -> None:
     image = parse_hex(make_hex(b"\xAA" * 64))
     start, end = image.region2()
     assert start == REGION2_START
-    assert end == REGION2_START + len(HEADER) + 64
+    # the range is rounded up to whole 1 KB pages
+    assert end == REGION2_START + 1024
+
+
+def test_data_above_region2_does_not_extend_the_range() -> None:
+    image = Image()
+    image.add(REGION2_START, HEADER + b"\xAA" * 64)
+    image.add(0x3C000, b"\xBB" * 512)  # bootloader, above region 2
+    start, end = image.region2()
+    assert start == REGION2_START
+    assert end == REGION2_START + 1024
+
+
+def test_pxt_extension_records_are_ignored_but_recorded() -> None:
+    data = hex_records(REGION2_START, HEADER + b"\xAA" * 64)
+    extra = [_record(0, bytes.fromhex("9900c0de"), 0x0A), _record(0, b"\x42" * 16, 0x0C)]
+    image = parse_hex("\n".join(data + extra + [_record(0, b"", 0x01)]) + "\n")
+    assert image.dal_magic_address() == REGION2_START
+    assert sorted(image.extra_records) == [0x0A, 0x0C]
 
 
 def test_region2_stops_at_the_page_containing_embedded_source() -> None:
@@ -82,21 +100,24 @@ def test_region2_is_capped_at_the_end_of_flash() -> None:
 def test_blocks_are_64_bytes_and_4_byte_aligned() -> None:
     payload = b"\xAA" * (3 * BLOCK_BYTES)
     image = parse_hex(make_hex(payload))
+    start, end = image.region2()
     blocks = image.blocks()
-    expected = -(-(len(HEADER) + len(payload)) // BLOCK_BYTES)
-    assert len(blocks) == expected
+    assert len(blocks) == (end - start) // BLOCK_BYTES
     assert all(len(data) == BLOCK_BYTES for _, data in blocks)
     assert all(address % 4 == 0 for address, _ in blocks)
-    assert [a for a, _ in blocks] == [REGION2_START + i * BLOCK_BYTES for i in range(expected)]
+    assert [a for a, _ in blocks] == [start + i * BLOCK_BYTES for i in range(len(blocks))]
 
 
-def test_partial_final_block_is_padded_with_ff() -> None:
-    image = parse_hex(make_hex(b"\xAA" * 20))
+def test_tail_beyond_the_program_is_filled_with_ff() -> None:
+    payload = b"\xAA" * 20
+    image = parse_hex(make_hex(payload))
+    start, end = image.region2()
     blocks = image.blocks()
-    assert len(blocks) == 1
-    used = len(HEADER) + 20
-    assert blocks[0][1][:used] == (HEADER + b"\xAA" * 20)
-    assert blocks[0][1][used:] == b"\xff" * (BLOCK_BYTES - used)
+    used = len(HEADER) + len(payload)
+    flat = b"".join(data for _, data in blocks)
+    assert flat[:used] == HEADER + payload
+    # everything from the end of the program to the page boundary is erased flash
+    assert flat[used:] == b"\xff" * (end - start - used)
 
 
 def test_missing_magic_is_a_clear_error() -> None:

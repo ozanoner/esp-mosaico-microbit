@@ -67,18 +67,21 @@ def settings(tmp_path: Path) -> Settings:
 def test_build_extracts_hashes_and_geometry(settings: Settings) -> None:
     result = build("basic.showString('A1')", settings=settings)
     data_bytes = len(HEADER) + len(BODY)
+    page_end = 0x30000 + ((data_bytes + 1023) // 1024) * 1024
     assert result.template_hash == TEMPLATE_HASH.hex()
     assert result.program_hash == PROGRAM_HASH.hex()
     assert result.region2_start == 0x30000
-    assert result.region2_end == 0x30000 + data_bytes
-    assert result.block_count == -(-data_bytes // 64)
+    assert result.region2_end == page_end
+    assert result.block_count == (page_end - 0x30000) // 64
     assert result.toolchain_id == "test-toolchain"
     assert len(result.sha256) == 64
 
 
 def test_build_json_carries_base64_hex(settings: Settings) -> None:
     payload = build("basic.showString('A1')", settings=settings).to_json()
-    assert payload["region2"] == {"start": 0x30000, "end": 0x30000 + len(HEADER) + len(BODY)}
+    data_bytes = len(HEADER) + len(BODY)
+    page_end = 0x30000 + ((data_bytes + 1023) // 1024) * 1024
+    assert payload["region2"] == {"start": 0x30000, "end": page_end}
     assert set(payload) >= {"hex_b64", "sha256", "template_hash", "program_hash", "block_count"}
     assert "hex_bytes" not in payload
 
