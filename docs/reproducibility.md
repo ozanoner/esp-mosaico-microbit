@@ -19,6 +19,19 @@ compare the template hash, program hash, region-2 range, block count and the
 sha256 of the region-2 bytes against the golden file. Any drift fails the check
 with the exact field that moved.
 
+## Housekeeping
+
+Containers run as root, so the artefacts they write into the checkout
+(`build/`, `__pycache__/`, `*.egg-info/`) are root-owned. They are all
+gitignored, and `make clean` removes them from inside a container:
+
+```sh
+make clean
+```
+
+`docker compose down` stops the services; named volumes (`idf-ccache`,
+`esp-iris-state`) survive on purpose.
+
 ## What is deliberately *not* pinned
 
 - **Network at image build time.** `npm ci`, `uv sync` and the mkc warm-up build

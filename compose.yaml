@@ -4,8 +4,10 @@
 #   docker compose up -d esp-idf          # ESP-IDF toolchain for firmware work
 #   docker compose run --rm brain verify  # reproducibility check
 #
-# Only Docker is required on the host. No toolchain, no node, no venv.
-name: esp-mosaico-microbit
+# Only Docker is required on the host.
+# No fixed project `name`: compose derives it from the checkout directory, so two
+# clones on one machine (or a fresh clone beside an old one) never fight over the
+# same containers and volumes.
 
 services:
   brain:

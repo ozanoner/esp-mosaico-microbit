@@ -47,4 +47,8 @@ down:
 	$(COMPOSE) down
 
 clean:
-	rm -rf build brain/.work
+	# container-written files are root-owned; delete them from a container
+	docker run --rm -v "$(CURDIR)":/w -w /w alpine:latest sh -c '\
+		rm -rf build brain/.work brain/esp_mb_brain.egg-info tools/hexkit/hexkit.egg-info; \
+		find . -name __pycache__ -type d -prune -exec rm -rf {} + ; \
+		find . -name .pytest_cache -type d -prune -exec rm -rf {} + '
