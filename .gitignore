@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# Brain: pinned MakeCode toolchain and work dirs (never committed)
+brain/.toolchain/
+brain/.work/
+
+# Built artefacts
+*.hex
+!microbit/template/*.hex
+!microbit/payloads/*.hex
+
+# Node / mkc
+node_modules/
+.npm/
+
+# ESP-IDF / firmware workspace
+firmware/build/
+firmware/managed_components/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/.codex-runs/
+firmware/dependencies.lock
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

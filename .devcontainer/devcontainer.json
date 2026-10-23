@@ -1,0 +1,23 @@
+{
+  "name": "esp-mosaico-microbit",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "esp-idf",
+  "workspaceFolder": "/workspaces/esp-mosaico-microbit",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "root",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "espressif.esp-idf-extension",
+        "ms-python.python",
+        "ms-vscode.cpptools"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/bin/python3",
+        "C_Cpp.default.compileCommands": "${workspaceFolder}/firmware/projects/microbit_studio/build/compile_commands.json"
+      }
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "postStartCommand": "bash .devcontainer/idf-facts.sh"
+}

@@ -1,0 +1,17 @@
+{
+  "name": "microbit-payload",
+  "version": "0.1.0",
+  "description": "Pinned template for KID-FACING payloads flashed over BLE",
+  "dependencies": {
+    "core": "*",
+    "bluetooth": "*"
+  },
+  "files": [
+    "main.ts"
+  ],
+  "target": "microbit",
+  "preferredEditor": "tsprj",
+  "microbit": {
+    "pairing_mode": "none"
+  }
+}
