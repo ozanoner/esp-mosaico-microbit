@@ -37,11 +37,19 @@ Two things this proves:
 
 ## Reproducing
 
+Nothing is installed on the host:
+
 ```sh
-source .venv/bin/activate
-MB_TOOLCHAIN_ID=mkc-1.3.6 python -m esp_mb_brain.builder microbit/payloads/hello.ts -o build/hello.hex
-python -m hexkit inspect build/hello.hex
+make verify      # tests + rebuild + golden-hash comparison, inside the container
+```
+
+Manual equivalent, if you want the parts:
+
+```sh
+docker compose run --rm brain build microbit/payloads/hello.ts -o build/hello.hex
+docker compose run --rm brain inspect build/hello.hex
 ```
 
 If either hash differs from the table above without a deliberate `mkc` upgrade,
-the build box has drifted. Never run `mkc --update`.
+the build box has drifted — `scripts/verify.sh` fails with the field that moved.
+Never run `mkc --update`; the image bakes the editor parts at build time.

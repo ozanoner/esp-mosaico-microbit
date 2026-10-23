@@ -13,6 +13,7 @@ dist/
 # Brain: pinned MakeCode toolchain and work dirs (never committed)
 brain/.toolchain/
 brain/.work/
+node_modules/
 
 # Built artefacts
 *.hex

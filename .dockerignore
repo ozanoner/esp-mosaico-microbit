@@ -1,0 +1,11 @@
+.git
+.venv
+build
+brain/.work
+brain/.toolchain
+**/__pycache__
+**/*.pyc
+firmware/build
+firmware/managed_components
+firmware/submodule
+node_modules
