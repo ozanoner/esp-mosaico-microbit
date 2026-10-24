@@ -18,4 +18,11 @@ menu "micro:bit voice (mb_voice)"
         int "Reply buffer size in bytes, allocated in PSRAM"
         default 8192
 
+    config MB_VOICE_SELFTEST_SECONDS
+        int "Bench self-test: record this many seconds after boot (0 = off)"
+        default 0
+        help
+            Records and posts once, N seconds after start, without the AI
+            button. For bench verification only; leave at 0 for the product.
+
 endmenu
