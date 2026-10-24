@@ -54,6 +54,8 @@ static const char k_name_prefix[] = "BBC micro:bit";
 
 static uint8_t s_own_addr_type;
 static uint16_t s_round;             /* completed probe rounds, for the log */
+static bool s_connected;             /* a link is up; read by the tx task */
+static volatile uint32_t s_last_progress_ms; /* last time the BLE path moved */
 static uint16_t s_chr_val_handle;    /* discovered value handle, 0 = none */
 static uint16_t s_svc_end_handle;    /* end of the partial-flash service */
 static bool s_cccd_pending;          /* subscribe write started for this round */
@@ -84,6 +86,31 @@ void ble_store_config_init(void); /* provided by the NimBLE port */
 
 static void mb_ble_scan(void);
 
+/* A task-watchdog reset leaves no panic and no coredump, so the interesting
+ * 5 s — where the BLE path stops moving — is invisible after the fact. This
+ * detector names the stall while it is happening. */
+static void mb_ble_mark_progress(void)
+{
+    s_last_progress_ms = (uint32_t)esp_log_timestamp();
+}
+
+static void mb_ble_watch_task(void *arg)
+{
+    (void)arg;
+
+    mb_ble_mark_progress();
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        const uint32_t gap = (uint32_t)esp_log_timestamp() - s_last_progress_ms;
+        if (gap > 6000u) {
+            ESP_LOGW(TAG, "no progress for %u ms: phase=%d block=%u packet=%u connected=%d",
+                     (unsigned)gap, (int)s_phase, (unsigned)s_block, (unsigned)s_packet,
+                     (int)s_connected);
+            mb_ble_mark_progress();
+        }
+    }
+}
+
 /* ---- gate G3: transfer helpers ---------------------------------------- */
 
 /* All ATT writes run on a dedicated task. NimBLE callbacks only enqueue:
@@ -97,7 +124,6 @@ typedef struct {
 static uint8_t s_tx[MB_FLASH_PACKETS_PER_BLOCK][MB_FLASH_PACKET_BYTES];
 static QueueHandle_t s_txq;
 static SemaphoreHandle_t s_tx_done;
-static bool s_connected;
 
 static int mb_ble_on_packet_write(uint16_t conn_handle, const struct ble_gatt_error *error,
                                   struct ble_gatt_attr *attr, void *arg)
@@ -109,6 +135,7 @@ static int mb_ble_on_packet_write(uint16_t conn_handle, const struct ble_gatt_er
     if (error->status != 0) {
         ESP_LOGE(TAG, "packet write rejected: status=%d", error->status);
     }
+    mb_ble_mark_progress();
     xSemaphoreGive(s_tx_done);
     return 0;
 }
@@ -251,6 +278,7 @@ static void mb_ble_region_answered(const mb_flash_notify_t *note)
 
 static void mb_ble_handle_notify(const struct os_mbuf *om)
 {
+    mb_ble_mark_progress();
     uint8_t buf[MB_FLASH_REGION_NOTIFY_BYTES];
     const uint16_t len = OS_MBUF_PKTLEN(om);
     const uint16_t copied = len < sizeof(buf) ? len : (uint16_t)sizeof(buf);
@@ -551,6 +579,7 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
 
 static void mb_ble_scan(void)
 {
+    mb_ble_mark_progress();
     struct ble_gap_disc_params params = {0};
     params.passive = 0;
     params.filter_duplicates = 1;
@@ -644,6 +673,10 @@ esp_err_t mb_ble_central_start(void)
     }
     if (xTaskCreate(mb_ble_tx_task, "mb_ble_tx", 4096, NULL, 4, NULL) != pdPASS) {
         ESP_LOGE(TAG, "could not start the tx task");
+        return ESP_ERR_NO_MEM;
+    }
+    if (xTaskCreate(mb_ble_watch_task, "mb_ble_wd", 3072, NULL, 2, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "could not start the stall detector");
         return ESP_ERR_NO_MEM;
     }
 
