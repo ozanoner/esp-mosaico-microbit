@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 import hexkit
 
-from .builder import BuildError, build
+from .builder import Build, BuildError, build
 from .config import settings
 from .providers import (
     AsrConfig,
@@ -45,14 +45,43 @@ def health() -> dict:
     }
 
 
-@app.post("/v1/build")
-def build_endpoint(request: BuildRequest) -> dict:
+def _region2_response(result: Build) -> Response:
+    """The device's view of a build: raw region-2 bytes, geometry in headers.
+
+    ~6 KB instead of 1.8 MB of base64, and no Intel HEX parsing on a chip that
+    has other uses for its RAM. Both build paths answer with the same header
+    names, so the firmware needs one parser, not two.
+    """
+    headers = {
+        "X-Region-Start": str(result.region2_start),
+        "X-Region-End": str(result.region2_end),
+        "X-Template-Hash": result.template_hash,
+        "X-Program-Hash": result.program_hash,
+        "X-Block-Count": str(result.block_count),
+    }
+    return Response(
+        content=result.region2_data,
+        media_type="application/octet-stream",
+        headers=headers,
+    )
+
+
+@app.post("/v1/build", response_model=None)
+def build_endpoint(request: BuildRequest, region2: bool = False) -> Response | dict:
+    """Compile `source` and return the build object.
+
+    With `region2=true` the reply is the byte stream the device writes over
+    BLE, not JSON — the gate-G4 path, where nothing on the device parses Intel
+    HEX.
+    """
     try:
         result = build(request.source, settings=settings)
     except BuildError as exc:
         raise HTTPException(status_code=502, detail={"error": str(exc), "log": exc.log})
     except hexkit.HexError as exc:
         raise HTTPException(status_code=502, detail={"error": f"hex geometry: {exc}"})
+    if region2:
+        return _region2_response(result)
     return result.to_json()
 
 
