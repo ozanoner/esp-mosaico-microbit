@@ -13,10 +13,12 @@ from mb_build_service import app as app_module
 from mb_build_service.builder import Build, BuildError
 from mb_build_service.speak import SpeakError, extract_source, generate_program
 from mb_build_service.providers import (
+    AsrConfig,
     FakeGenerator,
     FakeTranscriber,
     LlmConfig,
     OpenAiCompatibleGenerator,
+    OpenAiCompatibleTranscriber,
     ProviderError,
 )
 
@@ -99,6 +101,14 @@ def test_empty_transcript_is_rejected() -> None:
 def test_live_provider_requires_a_key() -> None:
     with pytest.raises(ProviderError):
         OpenAiCompatibleGenerator(LlmConfig(api_key=""))
+
+
+def test_local_asr_needs_no_key() -> None:
+    """The sidecar has no auth; an empty key must not block transcription."""
+    transcriber = OpenAiCompatibleTranscriber(
+        AsrConfig(base_url="http://asr:8000/v1", api_key="", model="base")
+    )
+    assert transcriber is not None
 
 
 def test_endpoint_takes_text_and_returns_geometry(monkeypatch) -> None:

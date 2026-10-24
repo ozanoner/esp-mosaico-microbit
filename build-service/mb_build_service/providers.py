@@ -72,8 +72,8 @@ class OpenAiCompatibleTranscriber:
     """`POST {base}/audio/transcriptions`, multipart built by hand."""
 
     def __init__(self, config: AsrConfig) -> None:
-        if not config.api_key:
-            raise ProviderError("MB_ASR_API_KEY is not set; ASR is unavailable")
+        # An empty key is legitimate: the sidecar container has no auth. Public
+        # endpoints need one, and fail loudly on 401 rather than here.
         self._config = config
 
     def transcribe(self, wav: bytes) -> str:
@@ -95,13 +95,13 @@ class OpenAiCompatibleTranscriber:
         body = b"".join(parts)
 
         url = f"{self._config.base_url.rstrip('/')}/audio/transcriptions"
+        headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+        if self._config.api_key:
+            headers["Authorization"] = f"Bearer {self._config.api_key}"
         request = urllib.request.Request(
             url,
             data=body,
-            headers={
-                "Content-Type": f"multipart/form-data; boundary={boundary}",
-                "Authorization": f"Bearer {self._config.api_key}",
-            },
+            headers=headers,
             method="POST",
         )
         try:

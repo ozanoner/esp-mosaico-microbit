@@ -1,0 +1,8 @@
+# Pinned: the transcription result must be a function of the repo, not of
+# whatever PyPI serves today. Regenerate deliberately, with a re-run of the
+# tests in build-service/tests.
+faster-whisper==1.2.1
+fastapi==0.162.0
+uvicorn==0.54.0
+python-multipart==0.0.32
+numpy==2.5.4

@@ -10,6 +10,20 @@
 # same containers and volumes.
 
 services:
+  # Speech-to-text sidecar. Not published to the host: the build service reaches
+  # it as http://asr:8000 on the compose network, so nothing new is exposed on
+  # the LAN and no ASR credential exists anywhere.
+  asr:
+    build:
+      context: .
+      dockerfile: asr/Dockerfile
+    image: esp-mosaico-microbit/asr:local
+    environment:
+      MB_ASR_MODEL_DIR: /models
+      MB_ASR_COMPUTE: int8
+      MB_ASR_LANGUAGE: en
+    restart: unless-stopped
+
   build-service:
     build:
       context: .
@@ -21,15 +35,17 @@ services:
     ports:
       # Host port is overridable; the container always listens on 8477.
       - "${BUILD_SERVICE_PORT:-8477}:8477"
+    depends_on:
+      - asr
     environment:
       MB_TOOLCHAIN_ID: mkc-1.3.6
       MB_PORT: "8477"
       # Passed through from the host .env only (gitignored, dockerignored).
       # Deliberately not env_file: .env also holds GITHUB_TOKEN, and the service
       # has no business seeing it.
-      MB_ASR_BASE_URL: ${MB_ASR_BASE_URL:-https://api.openai.com/v1}
+      MB_ASR_BASE_URL: ${MB_ASR_BASE_URL:-http://asr:8000/v1}
       MB_ASR_API_KEY: ${MB_ASR_API_KEY:-}
-      MB_ASR_MODEL: ${MB_ASR_MODEL:-whisper-1}
+      MB_ASR_MODEL: ${MB_ASR_MODEL:-base}
       MB_LLM_BASE_URL: ${MB_LLM_BASE_URL:-https://api.openai.com/v1}
       MB_LLM_API_KEY: ${MB_LLM_API_KEY:-}
       MB_LLM_MODEL: ${MB_LLM_MODEL:-gpt-4o-mini}
