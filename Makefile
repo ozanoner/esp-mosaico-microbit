@@ -37,8 +37,8 @@ logs:
 	$(COMPOSE) logs -f build-service
 
 firmware:
-	$(COMPOSE) up -d esp-idf
-	$(COMPOSE) exec esp-idf bash -lc 'cd /workspace/firmware && exec bash'
+	$(COMPOSE) up -d mosaico-idf
+	$(COMPOSE) exec mosaico-idf bash -lc 'cd /workspace/firmware && exec bash'
 
 ps:
 	$(COMPOSE) ps

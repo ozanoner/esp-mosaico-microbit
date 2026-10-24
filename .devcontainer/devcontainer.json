@@ -1,7 +1,7 @@
 {
   "name": "esp-mosaico-microbit",
   "dockerComposeFile": ["../compose.yaml"],
-  "service": "esp-idf",
+  "service": "mosaico-idf",
   "workspaceFolder": "/workspace",
   "shutdownAction": "stopCompose",
   "remoteUser": "root",

@@ -21,8 +21,8 @@ ESP-IDF is never installed on a host. The repository provides it as a container
 service, pinned by image digest:
 
 ```sh
-docker compose up -d esp-idf
-docker compose exec esp-idf bash -lc 'cd firmware && python3 mosaico.py doctor'
+docker compose up -d mosaico-idf
+docker compose exec mosaico-idf bash -lc 'cd firmware && python3 mosaico.py doctor'
 make firmware            # same thing, drops you into a shell
 ```
 
