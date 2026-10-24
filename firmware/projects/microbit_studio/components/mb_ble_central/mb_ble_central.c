@@ -234,11 +234,12 @@ static void mb_ble_tx_task(void *arg)
                 mb_ble_fail("E3", "the radio refused a packet");
                 break;
             }
-            if (xSemaphoreTake(s_tx_done, pdMS_TO_TICKS(2000)) != pdTRUE) {
-                /* A chain of missing acks is how a starved link looks, and it
-                 * must end the cycle with a state instead of leaving the panel
-                 * on "F" forever: measured on hardware, gate G4. */
-                mb_ble_fail("E3", "packet ack timed out after 2 s");
+            if (xSemaphoreTake(s_tx_done, pdMS_TO_TICKS(CONFIG_MB_BLE_ACK_TIMEOUT_MS)) != pdTRUE) {
+                /* Measured on hardware: the ATT response to the first packet of
+                 * a cold board arrived 300 ms *after* a 2 s deadline, and a
+                 * warm board answers each block in ~480 ms. 2 s was the bug,
+                 * not the link. */
+                mb_ble_fail("E3", "packet ack timed out");
                 break;
             }
             if (s_write_error != 0) {

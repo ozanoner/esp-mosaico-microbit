@@ -5,10 +5,9 @@ menu "micro:bit BLE central (mb_ble_central)"
         default 10
         range 1 100
         help
-            Each cycle writes region 2 and then proves it by reconnecting and
-            comparing REGION_INFO region 2 against the image's program_hash.
-            A cycle that only re-read a matching hash would not exercise the
-            thing the gate is about, so every cycle streams the image.
+            A cycle completes when REGION_INFO region 2 matches the image's
+            program_hash. Only the cycle that actually differs writes; the rest
+            prove the reconnect ritual — no A+B tap, no power cycle in between.
 
     config MB_BLE_PEER_TIMEOUT_S
         int "Seconds to wait for a micro:bit before reporting E4 on screen"
@@ -23,9 +22,19 @@ menu "micro:bit BLE central (mb_ble_central)"
         default 5000
         range 0 30000
         help
-            The micro:bit resets itself after END_OF_TX. Writing again as soon
-            as it is heard earned status=7 (invalid attribute value length) at
-            packet 1 of cycle 2 on every run, while a board that had been up for
-            minutes streamed all 96 blocks. This is the settle time.
+            The micro:bit resets itself after END_OF_TX and its GATT server is
+            slow to answer right after that boot, so the next scan waits rather
+            than racing it.
+
+    config MB_BLE_ACK_TIMEOUT_MS
+        int "Milliseconds to wait for the ATT response to one packet"
+        default 5000
+        range 500 30000
+        help
+            Measured: a warm board answers each 64-byte block in ~480 ms, so a
+            whole 96-block transfer takes ~45 s; the very first packet of a cold
+            board answered 300 ms after a 2 s deadline. 5 s is margin over the
+            measured tail, not a way to hide a stuck link — a lost response
+            still ends the cycle with E3.
 
 endmenu
