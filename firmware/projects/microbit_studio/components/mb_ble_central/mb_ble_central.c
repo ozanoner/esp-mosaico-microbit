@@ -304,6 +304,31 @@ static void mb_ble_send_block(uint32_t index)
     s_packet += MB_FLASH_PACKETS_PER_BLOCK;
 }
 
+/* A cycle is done either way: a transfer that landed, or a region 2 that
+ * already held the program. Only the first cycle of a run normally writes —
+ * rewriting an image that is already correct is what turned a lost ack into a
+ * corrupt region 2, and the gate is about the reconnect ritual, not about
+ * wearing the flash. */
+static void mb_ble_cycle_verified(const char *how)
+{
+    ++s_cycle;
+    s_round++;
+    ESP_LOGI(TAG, "cycle %u/%u VERIFIED (%s)", (unsigned)s_cycle,
+             (unsigned)CONFIG_MB_BLE_POC_CYCLES, how);
+    if (s_cycle < CONFIG_MB_BLE_POC_CYCLES) {
+        s_await_verify = false;
+        ESP_LOGI(TAG, "starting cycle %u/%u; disconnecting to rescan",
+                 (unsigned)(s_cycle + 1), (unsigned)CONFIG_MB_BLE_POC_CYCLES);
+        ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        return;
+    }
+    ESP_LOGI(TAG, "POC DONE %u/%u cycles verified with no manual reset",
+             (unsigned)s_cycle, (unsigned)CONFIG_MB_BLE_POC_CYCLES);
+    mb_ble_status("OK");
+    s_flash_done = true;
+    ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+}
+
 static void mb_ble_region_answered(const mb_flash_notify_t *note)
 {
     if (note->region == MB_FLASH_REGION_DAL) {
@@ -339,23 +364,12 @@ static void mb_ble_region_answered(const mb_flash_notify_t *note)
             mb_ble_fail("E3", "region 2 does not hold the program after the transfer");
             return;
         }
-        ++s_cycle;
-        ESP_LOGI(TAG, "cycle %u/%u VERIFIED (0x%05X-0x%05X)", (unsigned)s_cycle,
-                 (unsigned)CONFIG_MB_BLE_POC_CYCLES, s_image->region2_start,
-                 s_image->region2_end - 1u);
-        s_round++;
-        if (s_cycle < CONFIG_MB_BLE_POC_CYCLES) {
-            s_await_verify = false;
-            ESP_LOGI(TAG, "starting cycle %u/%u; disconnecting to rescan",
-                     (unsigned)(s_cycle + 1), (unsigned)CONFIG_MB_BLE_POC_CYCLES);
-            ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
-            return;
-        }
-        ESP_LOGI(TAG, "POC DONE %u/%u cycles verified with no manual reset",
-                 (unsigned)s_cycle, (unsigned)CONFIG_MB_BLE_POC_CYCLES);
-        mb_ble_status("OK");
-        s_flash_done = true;
-        ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        mb_ble_cycle_verified("after the transfer");
+        return;
+    }
+
+    if (holds_ours) {
+        mb_ble_cycle_verified("region 2 already holds the program, no write");
         return;
     }
 
