@@ -17,6 +17,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -116,6 +117,35 @@ static void mb_ble_fail(const char *state, const char *why)
 void ble_store_config_init(void); /* provided by the NimBLE port */
 
 static void mb_ble_scan(void);
+
+/* The micro:bit resets itself after END_OF_TX, and its partial-flash service
+ * rejects a write that arrives before the DAL has settled: cycle 2 of every run
+ * failed 2.6 s in with status=7 (invalid attribute value length), while cycle 1
+ * — against a board that had been up for 11 minutes — streamed all 96 blocks.
+ * So the next scan waits CONFIG_MB_BLE_CYCLE_GAP_MS instead of racing the boot.
+ *
+ * A timer, not a delay: this is called from the GAP and GATT callbacks, which
+ * run on the NimBLE host task, and sleeping there stops HCI processing for the
+ * whole stack. */
+static esp_timer_handle_t s_scan_timer;
+
+static void mb_ble_scan_timer_cb(void *arg)
+{
+    (void)arg;
+    mb_ble_scan();
+}
+
+static void mb_ble_scan_soon(uint32_t delay_ms)
+{
+    if (s_scan_timer == NULL) {
+        mb_ble_scan();
+        return;
+    }
+    (void)esp_timer_stop(s_scan_timer);
+    if (esp_timer_start_once(s_scan_timer, (uint64_t)delay_ms * 1000u) != ESP_OK) {
+        mb_ble_scan();
+    }
+}
 
 /* A task-watchdog reset leaves no panic and no coredump, so the interesting
  * 5 s — where the BLE path stops moving — is invisible after the fact. This
@@ -622,10 +652,10 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_DISCONNECT:
         s_connected = false;
         ESP_LOGW(TAG, "disconnected: reason=%d", event->disconnect.reason);
-        /* No delay here: this callback runs on the NimBLE host task, and
-         * sleeping in it stops HCI processing for the whole stack. Scanning
-         * again immediately is enough of a back-off. */
-        mb_ble_scan();
+        /* No delay in this callback: it runs on the NimBLE host task, and
+         * sleeping here stops HCI processing for the whole stack. The gap the
+         * micro:bit needs after its own reset is a timer instead. */
+        mb_ble_scan_soon(s_flash_done ? 0u : CONFIG_MB_BLE_CYCLE_GAP_MS);
         return 0;
 
     case BLE_GAP_EVENT_MTU:
@@ -743,6 +773,14 @@ esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_flash_status_fn
     if (s_txq == NULL || s_tx_done == NULL) {
         ESP_LOGE(TAG, "could not allocate the tx queue");
         return ESP_ERR_NO_MEM;
+    }
+    const esp_timer_create_args_t timer_args = {
+        .callback = mb_ble_scan_timer_cb,
+        .name = "mb_ble_gap",
+    };
+    if (esp_timer_create(&timer_args, &s_scan_timer) != ESP_OK) {
+        ESP_LOGW(TAG, "no timer for the inter-cycle gap; scans stay immediate");
+        s_scan_timer = NULL;
     }
     if (xTaskCreate(mb_ble_tx_task, "mb_ble_tx", 4096, NULL, 4, NULL) != pdPASS) {
         ESP_LOGE(TAG, "could not start the tx task");

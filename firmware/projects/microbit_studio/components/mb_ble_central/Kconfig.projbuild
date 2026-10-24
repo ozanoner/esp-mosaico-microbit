@@ -18,4 +18,14 @@ menu "micro:bit BLE central (mb_ble_central)"
             The scan runs forever; this only decides when the panel says the
             board was never found, instead of showing no state at all.
 
+    config MB_BLE_CYCLE_GAP_MS
+        int "Milliseconds to wait before scanning for the next cycle"
+        default 5000
+        range 0 30000
+        help
+            The micro:bit resets itself after END_OF_TX. Writing again as soon
+            as it is heard earned status=7 (invalid attribute value length) at
+            packet 1 of cycle 2 on every run, while a board that had been up for
+            minutes streamed all 96 blocks. This is the settle time.
+
 endmenu
