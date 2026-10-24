@@ -38,6 +38,11 @@ services:
       - .:/workspace:cached
       - idf-ccache:/root/.ccache
       - esp-iris-state:/root/.local/state/esp-mosaico
+      # The GSP compiler is acquired into /root/.cache at configure time. Without
+      # this volume a re-created container loses it while build/CMakeCache.txt
+      # still points at the old path, and the next configure fails the esp-gsp
+      # contract check.
+      - esp-mosaico-cache:/root/.cache/esp-mosaico
     # No `devices:` entries here: a build host or CI has no board attached, and a
     # fixed node that does not exist makes `docker compose up` fail. To flash from
     # a workstation with the device plugged in, add the hardware overlay:
@@ -47,3 +52,4 @@ services:
 volumes:
   idf-ccache:
   esp-iris-state:
+  esp-mosaico-cache:
