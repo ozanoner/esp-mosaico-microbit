@@ -13,6 +13,9 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_netif.h"
+#include "esp_event.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -91,6 +94,16 @@ static void post_wav(const uint8_t *wav, size_t len)
         .method = HTTP_METHOD_POST,
         .timeout_ms = 120000,
     };
+
+    /* Log where the board actually sits: an unreachable service is otherwise
+     * indistinguishable from a wrong subnet or an isolating access point. */
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip;
+    if (sta != NULL && esp_netif_get_ip_info(sta, &ip) == ESP_OK && ip.ip.addr != 0) {
+        ESP_LOGI(TAG, "device IP " IPSTR " gw " IPSTR, IP2STR(&ip.ip), IP2STR(&ip.gw));
+    } else {
+        ESP_LOGW(TAG, "no IP yet; the POST will fail");
+    }
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client == NULL) {
         ESP_LOGE(TAG, "could not create the HTTP client");
@@ -149,14 +162,16 @@ static void record_task(void *arg)
         s_pcm_len = 0;
         ESP_LOGI(TAG, "recording (max %d s)", CONFIG_MB_VOICE_MAX_SECONDS);
         while (s_recording && (s_pcm_len + READ_CHUNK) <= CAPACITY) {
-            const int got = esp_codec_dev_read(s_mic, s_wav + WAV_HEADER_BYTES + s_pcm_len, READ_CHUNK);
-            if (got > 0) {
-                s_pcm_len += (size_t)got;
-            } else if (got < 0) {
-                ESP_LOGE(TAG, "microphone read failed (%d)", got);
-                break;
+            /* esp_codec_dev_read returns a status, not a byte count:
+             * ESP_CODEC_DEV_OK (0) means the chunk was filled — see
+             * examples/voice_wake_cmd/main/main.c:141. Reading the return as a
+             * length is what made every capture look empty. */
+            const int rc = esp_codec_dev_read(s_mic, s_wav + WAV_HEADER_BYTES + s_pcm_len, READ_CHUNK);
+            if (rc == ESP_CODEC_DEV_OK) {
+                s_pcm_len += READ_CHUNK;
             } else {
-                vTaskDelay(pdMS_TO_TICKS(5));   /* no frames yet; do not spin */
+                ESP_LOGE(TAG, "microphone read failed (%d)", rc);
+                break;
             }
         }
 
@@ -174,6 +189,42 @@ static void record_task(void *arg)
 #if CONFIG_MB_VOICE_SELFTEST_SECONDS > 0
 static void selftest_task(void *arg);
 #endif
+
+static void wifi_start(void)
+{
+    /* Credentials are provisioned once through Vibe Mode
+     * (`mosaico.py iris test recovery-wifi`), which stores them in NVS. The app
+     * only has to bring the station up with FLASH storage so it picks them up. */
+    esp_err_t err = esp_netif_init();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "netif init failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = esp_event_loop_create_default();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "event loop failed: %s", esp_err_to_name(err));
+        return;
+    }
+    if (esp_netif_create_default_wifi_sta() == NULL) {
+        ESP_LOGE(TAG, "could not create the WiFi station netif");
+        return;
+    }
+
+    wifi_init_config_t config = WIFI_INIT_CONFIG_DEFAULT();
+    err = esp_wifi_init(&config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "wifi init failed: %s", esp_err_to_name(err));
+        return;
+    }
+    esp_wifi_set_storage(WIFI_STORAGE_FLASH);
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    err = esp_wifi_start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "wifi start failed: %s", esp_err_to_name(err));
+        return;
+    }
+    ESP_LOGI(TAG, "WiFi station up; credentials come from NVS");
+}
 
 esp_err_t mb_voice_start(void)
 {
@@ -216,6 +267,8 @@ esp_err_t mb_voice_start(void)
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "could not set the microphone gain: %s", esp_err_to_name(err));
     }
+
+    wifi_start();
 
     s_pressed = xSemaphoreCreateBinary();
     if (s_pressed == NULL) {
