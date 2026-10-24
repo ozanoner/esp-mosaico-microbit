@@ -1,8 +1,12 @@
 """HTTP surface of the build service.
 
-`/v1/build` compiles source that already exists. `/v1/idea` is the voice entry
+`/v1/build` compiles source that already exists. `/v1/speak` is the voice entry
 point: audio (or text) in, a compiled image out, with one compiler-feedback
 retry. Both return the same geometry, because both feed the same flash path.
+
+The route is deliberately not called "idea": Espressif and the vendor's Ideas
+release API (`/api/v1/ideas/...`) already own that word, and this endpoint
+generates code rather than packaging a release.
 """
 
 from __future__ import annotations
@@ -15,7 +19,6 @@ import hexkit
 
 from .builder import BuildError, build
 from .config import settings
-from .idea import IdeaError, generate_program
 from .providers import (
     AsrConfig,
     LlmConfig,
@@ -23,6 +26,7 @@ from .providers import (
     OpenAiCompatibleTranscriber,
     ProviderError,
 )
+from .speak import SpeakError, generate_program as generate_from_speech
 
 app = FastAPI(title="esp-mosaico-microbit build service", version="0.1.0")
 
@@ -52,8 +56,8 @@ def build_endpoint(request: BuildRequest) -> dict:
     return result.to_json()
 
 
-@app.post("/v1/idea")
-async def idea_endpoint(request: Request) -> dict:
+@app.post("/v1/speak")
+async def speak_endpoint(request: Request) -> dict:
     """Audio (or text) in, compiled image out.
 
     Accepts either `application/json` with {"text": ...} — used by tests and by
@@ -72,10 +76,10 @@ async def idea_endpoint(request: Request) -> dict:
             transcript = OpenAiCompatibleTranscriber(AsrConfig()).transcribe(audio)
 
         generator = OpenAiCompatibleGenerator(LlmConfig())
-        result = generate_program(transcript, generator=generator, settings=settings)
+        result = generate_from_speech(transcript, generator=generator, settings=settings)
     except ProviderError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except IdeaError as exc:
+    except SpeakError as exc:
         raise HTTPException(
             status_code=502,
             detail={

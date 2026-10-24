@@ -58,7 +58,7 @@ defaults so a second service on the same LAN box cannot collide with it.
 
 Measured values for the two PoC payloads: `TOOLCHAIN.md`.
 
-## `POST /v1/idea` — speech (or text) in, compiled image out
+## `POST /v1/speak` — speech (or text) in, compiled image out
 
 The voice entry point. Two content types:
 
@@ -69,7 +69,7 @@ The voice entry point. Two content types:
 Credentials are read from the environment only (`MB_ASR_*`, `MB_LLM_*` in
 `.env`, gitignored and dockerignored). Both providers speak the OpenAI-compatible
 HTTP API with `urllib`, so there is no new runtime dependency and swapping to a
-local vLLM or a LAN gateway is a `.env` change. With no key set, `/v1/idea`
+local vLLM or a LAN gateway is a `.env` change. With no key set, `/v1/speak`
 answers `503` with the missing variable's name; `/v1/health` and `/v1/build`
 keep working.
 

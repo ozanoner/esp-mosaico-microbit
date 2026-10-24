@@ -39,7 +39,7 @@ Rules, all mandatory:
 MAX_ATTEMPTS = 2
 
 
-class IdeaError(RuntimeError):
+class SpeakError(RuntimeError):
     """Raised when no attempt compiled. Carries what the device should display."""
 
     def __init__(self, transcript: str, source: str, log: str, attempts: int) -> None:
@@ -56,7 +56,7 @@ class IdeaError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class Idea:
+class SpeakResult:
     transcript: str
     source: str
     attempts: int
@@ -115,7 +115,7 @@ def generate_program(
     generator: Generator,
     settings: Settings | None = None,
     build_fn=build,
-) -> Idea:
+) -> SpeakResult:
     """Turn a transcript into a compiled image, retrying once with the compiler log."""
     if not transcript.strip():
         raise ValueError("empty transcript")
@@ -131,13 +131,13 @@ def generate_program(
         except BuildError as exc:
             logs.append(exc.log)
             if attempt == MAX_ATTEMPTS:
-                raise IdeaError(transcript, source, exc.log, attempt) from exc
+                raise SpeakError(transcript, source, exc.log, attempt) from exc
             prompt = (
                 f"{transcript}\n\n"
                 "Your previous answer failed to compile. Fix it and reply with main.ts only.\n"
                 f"Program:\n{source}\n\nCompiler output:\n{exc.log[-2000:]}"
             )
             continue
-        return Idea(transcript=transcript, source=source, attempts=attempt, build=result, compiler_logs=logs)
+        return SpeakResult(transcript=transcript, source=source, attempts=attempt, build=result, compiler_logs=logs)
 
     raise AssertionError("unreachable")

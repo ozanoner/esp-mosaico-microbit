@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from mb_build_service import app as app_module
 from mb_build_service.builder import Build, BuildError
-from mb_build_service.idea import IdeaError, extract_source, generate_program
+from mb_build_service.speak import SpeakError, extract_source, generate_program
 from mb_build_service.providers import (
     FakeGenerator,
     FakeTranscriber,
@@ -83,7 +83,7 @@ def test_second_failure_raises_with_the_compiler_message() -> None:
     def always_fails(source: str, *, settings=None) -> Build:
         raise BuildError("mkc build failed (exit 1)", "error: cannot find name 'Foo'")
 
-    with pytest.raises(IdeaError) as caught:
+    with pytest.raises(SpeakError) as caught:
         generate_program("nonsense", generator=FakeGenerator(GOOD, GOOD), build_fn=always_fails)
     err = caught.value
     assert err.attempts == 2
@@ -104,10 +104,10 @@ def test_live_provider_requires_a_key() -> None:
 def test_endpoint_takes_text_and_returns_geometry(monkeypatch) -> None:
     monkeypatch.setattr(app_module, "OpenAiCompatibleGenerator", lambda cfg: FakeGenerator(GOOD))
     monkeypatch.setattr(
-        app_module, "generate_program", lambda transcript, **kw: generate_program(transcript, generator=FakeGenerator(GOOD), build_fn=stub_build)
+        app_module, "generate_from_speech", lambda transcript, **kw: generate_program(transcript, generator=FakeGenerator(GOOD), build_fn=stub_build)
     )
     client = TestClient(app_module.app)
-    response = client.post("/v1/idea", json={"text": "show a heart"})
+    response = client.post("/v1/speak", json={"text": "show a heart"})
     assert response.status_code == 200
     body = response.json()
     assert body["transcript"] == "show a heart"
@@ -117,12 +117,12 @@ def test_endpoint_takes_text_and_returns_geometry(monkeypatch) -> None:
 
 def test_endpoint_returns_compiler_message_on_failure(monkeypatch) -> None:
     def boom(*args, **kwargs):
-        raise IdeaError("show a heart", GOOD, "error: cannot find name 'Foo'", 2)
+        raise SpeakError("show a heart", GOOD, "error: cannot find name 'Foo'", 2)
 
     monkeypatch.setattr(app_module, "OpenAiCompatibleGenerator", lambda cfg: FakeGenerator(GOOD))
-    monkeypatch.setattr(app_module, "generate_program", boom)
+    monkeypatch.setattr(app_module, "generate_from_speech", boom)
     client = TestClient(app_module.app)
-    response = client.post("/v1/idea", json={"text": "show a heart"})
+    response = client.post("/v1/speak", json={"text": "show a heart"})
     assert response.status_code == 502
     detail = response.json()["detail"]
     assert "cannot find name 'Foo'" in detail["compiler_message"]
@@ -134,7 +134,7 @@ def test_endpoint_uses_asr_for_audio(monkeypatch) -> None:
     monkeypatch.setattr(app_module, "OpenAiCompatibleTranscriber", lambda cfg: transcriber)
     monkeypatch.setattr(app_module, "OpenAiCompatibleGenerator", lambda cfg: FakeGenerator(GOOD))
     client = TestClient(app_module.app)
-    response = client.post("/v1/idea", content=b"RIFF....WAVE", headers={"content-type": "audio/wav"})
+    response = client.post("/v1/speak", content=b"RIFF....WAVE", headers={"content-type": "audio/wav"})
     assert response.status_code == 200
     assert response.json()["transcript"] == "play a tune"
     assert transcriber.calls == [b"RIFF....WAVE"]
