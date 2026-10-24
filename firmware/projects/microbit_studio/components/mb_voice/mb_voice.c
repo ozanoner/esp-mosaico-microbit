@@ -5,6 +5,7 @@
 
 #include "mb_voice.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "bsp/esp_mosaico.h"
@@ -28,6 +29,11 @@ static const char *TAG = "mb_voice";
 #define BYTES_PER_SAMPLE 2
 #define WAV_HEADER_BYTES 44u
 #define READ_CHUNK 2048u
+/* Speech at arm's length clipped the ADC at the BSP example's 30 dB: every
+ * press reported peak 32768 of 32767 while silence sat at 322, so the top of
+ * the waveform was flat. 24 dB keeps the same capture well clear of full scale
+ * (6 dB = half the amplitude) and costs nothing the ASR needs. */
+#define MIC_GAIN_DB 24.0f
 #define CAPACITY ((size_t)SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE * CONFIG_MB_VOICE_MAX_SECONDS)
 
 static uint8_t *s_wav;          /* PSRAM: header + PCM, header written on stop */
@@ -68,19 +74,50 @@ static void wav_header(uint8_t *p, uint32_t data_len)
     put_le32(p + 40, data_len);
 }
 
-static void log_reply(int status, const char *body)
+/* The response body is only available while esp_http_client_perform() is on the
+ * stack: it drains the socket itself and a later esp_http_client_read() returns
+ * 0, which is why the reply used to arrive empty. Collect it in the event
+ * handler instead (esp_http_client_event_id_t, HTTP_EVENT_ON_DATA). */
+typedef struct {
+    char *buf;
+    size_t capacity;
+    size_t len;
+    bool truncated;
+} reply_t;
+
+static esp_err_t on_http_event(esp_http_client_event_t *evt)
 {
-    if (body == NULL || body[0] == 0) {
+    reply_t *reply = (reply_t *)evt->user_data;
+    if (reply == NULL || evt->event_id != HTTP_EVENT_ON_DATA ||
+        evt->data == NULL || evt->data_len <= 0) {
+        return ESP_OK;
+    }
+    const size_t room = reply->capacity - 1u - reply->len;
+    const size_t take = (size_t)evt->data_len < room ? (size_t)evt->data_len : room;
+    memcpy(reply->buf + reply->len, evt->data, take);
+    reply->len += take;
+    reply->buf[reply->len] = '\0';
+    if (take < (size_t)evt->data_len) {
+        reply->truncated = true;
+    }
+    return ESP_OK;
+}
+
+static void log_reply(int status, const reply_t *reply)
+{
+    if (reply == NULL || reply->len == 0) {
         ESP_LOGE(TAG, "service returned %d with an empty body", status);
         return;
     }
+    /* Truncation is reported rather than hidden: a clipped JSON body is useless
+     * for telling a compiler error from a provider error. */
     if (status == 200) {
-        /* !include_hex=false keeps this under a kilobyte, so log it whole. The
-         * transcript and geometry are both in here; parsing arrives with the UI
-         * work that displays them, together with a JSON dependency. */
-        ESP_LOGI(TAG, "reply: %s", body);
+        /* !include_hex=false keeps this under a kilobyte, so log it whole. */
+        ESP_LOGI(TAG, "reply (%u bytes%s): %s", (unsigned)reply->len,
+                 reply->truncated ? ", TRUNCATED" : "", reply->buf);
     } else {
-        ESP_LOGE(TAG, "service returned %d: %s", status, body);
+        ESP_LOGE(TAG, "service returned %d (%u bytes%s): %s", status, (unsigned)reply->len,
+                 reply->truncated ? ", TRUNCATED" : "", reply->buf);
     }
 }
 
@@ -89,10 +126,20 @@ static void post_wav(const uint8_t *wav, size_t len)
     char url[192];
     snprintf(url, sizeof(url), "%s?include_hex=false", CONFIG_MB_VOICE_SERVICE_URL);
 
+    char *body = heap_caps_malloc(CONFIG_MB_VOICE_REPLY_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (body == NULL) {
+        ESP_LOGE(TAG, "no PSRAM for a %d-byte reply buffer", CONFIG_MB_VOICE_REPLY_BYTES);
+        return;
+    }
+    reply_t reply = {.buf = body, .capacity = CONFIG_MB_VOICE_REPLY_BYTES, .len = 0};
+    body[0] = '\0';
+
     esp_http_client_config_t config = {
         .url = url,
         .method = HTTP_METHOD_POST,
         .timeout_ms = 120000,
+        .event_handler = on_http_event,
+        .user_data = &reply,
     };
 
     /* Log where the board actually sits: an unreachable service is otherwise
@@ -107,13 +154,7 @@ static void post_wav(const uint8_t *wav, size_t len)
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client == NULL) {
         ESP_LOGE(TAG, "could not create the HTTP client");
-        return;
-    }
-
-    char *reply = heap_caps_malloc(CONFIG_MB_VOICE_REPLY_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (reply == NULL) {
-        ESP_LOGE(TAG, "no PSRAM for a %d-byte reply buffer", CONFIG_MB_VOICE_REPLY_BYTES);
-        esp_http_client_cleanup(client);
+        free(body);
         return;
     }
 
@@ -124,25 +165,11 @@ static void post_wav(const uint8_t *wav, size_t len)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "POST failed: %s", esp_err_to_name(err));
     } else {
-        const int status = esp_http_client_get_status_code(client);
-        reply[0] = 0;
-        /* Chunked replies report no content length, so read until the client
-         * says there is nothing left. */
-        int total = 0;
-        while (total < CONFIG_MB_VOICE_REPLY_BYTES - 1) {
-            const int got = esp_http_client_read(client, reply + total,
-                                                CONFIG_MB_VOICE_REPLY_BYTES - 1 - total);
-            if (got <= 0) {
-                break;
-            }
-            total += got;
-        }
-        reply[total] = 0;
-        log_reply(status, reply);
+        log_reply(esp_http_client_get_status_code(client), &reply);
     }
 
-    free(reply);
     esp_http_client_cleanup(client);
+    free(body);
 }
 
 static void on_ai_button(void *button, void *user_data)
@@ -156,6 +183,66 @@ static void on_ai_button(void *button, void *user_data)
     } else if (event == BUTTON_PRESS_UP) {
         s_recording = false;
     }
+}
+
+/* A capture can be the right length and still carry nothing: the I2S stream
+ * runs whether or not the microphone is routed to it. Peak and RMS separate
+ * "the codec delivered silence" from "the speech was not recognised", which
+ * otherwise look identical once ASR answers with an empty transcript.
+ *
+ * Peak alone cannot say whether the signal is damaged, though: one sample from
+ * the button thump reports the same 32768 as a waveform flat-topped by a
+ * saturated input stage. So the count, the first position and the longest run
+ * of near-full-scale samples are logged too — a thump is a couple of adjacent
+ * samples at the start, saturation is a long run anywhere. */
+#define CLIP_LEVEL 32000
+
+static void log_capture_stats(const uint8_t *pcm, size_t len)
+{
+    const int16_t *samples = (const int16_t *)pcm;
+    const size_t count = len / sizeof(int16_t);
+    int32_t peak = 0;
+    size_t nonzero = 0;
+    int64_t sum_squares = 0;
+    size_t clipped = 0;
+    int32_t first_clip = -1;
+    size_t run = 0;
+    size_t longest_run = 0;
+
+    for (size_t i = 0; i < count; i++) {
+        const int32_t value = samples[i];
+        const int32_t magnitude = value < 0 ? -value : value;
+        if (magnitude > peak) {
+            peak = magnitude;
+        }
+        if (value != 0) {
+            nonzero++;
+        }
+        sum_squares += (int64_t)value * value;
+        if (magnitude >= CLIP_LEVEL) {
+            if (first_clip < 0) {
+                first_clip = (int32_t)i;
+            }
+            clipped++;
+            run++;
+            if (run > longest_run) {
+                longest_run = run;
+            }
+        } else {
+            run = 0;
+        }
+    }
+
+    const double rms = count > 0 ? sqrt((double)sum_squares / (double)count) : 0.0;
+    ESP_LOGI(TAG,
+             "capture: %u samples (%.2f s), peak %ld, rms %.1f, nonzero %.1f%%, "
+             "clipped %u (%.2f%%) first %d run %u, head %d %d %d %d",
+             (unsigned)count, (double)count / (double)SAMPLE_RATE, (long)peak, rms,
+             count > 0 ? 100.0 * (double)nonzero / (double)count : 0.0,
+             (unsigned)clipped, count > 0 ? 100.0 * (double)clipped / (double)count : 0.0,
+             (int)first_clip, (unsigned)longest_run,
+             count > 0 ? samples[0] : 0, count > 1 ? samples[1] : 0,
+             count > 2 ? samples[2] : 0, count > 3 ? samples[3] : 0);
 }
 
 static void record_task(void *arg)
@@ -189,6 +276,7 @@ static void record_task(void *arg)
         }
 
         wav_header(s_wav, (uint32_t)s_pcm_len);
+        log_capture_stats(s_wav + WAV_HEADER_BYTES, s_pcm_len);
         ESP_LOGI(TAG, "sending %u bytes of audio", (unsigned)(WAV_HEADER_BYTES + s_pcm_len));
         post_wav(s_wav, WAV_HEADER_BYTES + s_pcm_len);
     }
@@ -309,9 +397,14 @@ esp_err_t mb_voice_start(void)
         ESP_LOGE(TAG, "could not open the microphone: %s", esp_err_to_name(err));
         return err;
     }
-    err = esp_codec_dev_set_in_gain(s_mic, 30.0f);
+    err = esp_codec_dev_set_in_gain(s_mic, MIC_GAIN_DB);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "could not set the microphone gain: %s", esp_err_to_name(err));
+    } else {
+        /* The bench log has to state the gain: a capture's peak only means
+         * something beside the gain that produced it. */
+        ESP_LOGI(TAG, "microphone: %d Hz mono %d-bit, %.0f dB input gain",
+                 SAMPLE_RATE, BYTES_PER_SAMPLE * 8, (double)MIC_GAIN_DB);
     }
 
     /* On its own task: associating can take seconds and the panel must not wait. */
