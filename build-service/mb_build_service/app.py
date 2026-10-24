@@ -57,7 +57,7 @@ def build_endpoint(request: BuildRequest) -> dict:
 
 
 @app.post("/v1/speak")
-async def speak_endpoint(request: Request) -> dict:
+async def speak_endpoint(request: Request, include_hex: bool = True) -> dict:
     """Audio (or text) in, compiled image out.
 
     Accepts either `application/json` with {"text": ...} — used by tests and by
@@ -93,7 +93,9 @@ async def speak_endpoint(request: Request) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    return result.to_json()
+    # `include_hex=false` keeps the reply small: the device needs the geometry
+    # (hashes, block count) before deciding to pull 1.3 MB of base64 hex.
+    return result.to_json(include_hex=include_hex)
 
 
 def run() -> None:

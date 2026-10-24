@@ -123,6 +123,21 @@ def test_endpoint_takes_text_and_returns_geometry(monkeypatch) -> None:
     assert body["transcript"] == "show a heart"
     assert body["block_count"] == 64
     assert body["template_hash"] == "08d9ef69355ad697"
+    assert "hex_b64" in body
+
+
+def test_endpoint_can_omit_hex(monkeypatch) -> None:
+    """The device asks for geometry first; 1.8 MB of base64 would blow its heap."""
+    monkeypatch.setattr(app_module, "OpenAiCompatibleGenerator", lambda cfg: FakeGenerator(GOOD))
+    monkeypatch.setattr(
+        app_module, "generate_from_speech", lambda transcript, **kw: generate_program(transcript, generator=FakeGenerator(GOOD), build_fn=stub_build)
+    )
+    client = TestClient(app_module.app)
+    response = client.post("/v1/speak?include_hex=false", json={"text": "show a heart"})
+    assert response.status_code == 200
+    body = response.json()
+    assert "hex_b64" not in body
+    assert body["block_count"] == 64
 
 
 def test_endpoint_returns_compiler_message_on_failure(monkeypatch) -> None:

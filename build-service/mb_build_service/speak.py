@@ -63,14 +63,14 @@ class SpeakResult:
     build: Build
     compiler_logs: list[str] = field(default_factory=list)
 
-    def to_json(self) -> dict:
+    def to_json(self, *, include_hex: bool = True) -> dict:
         payload = {
             "transcript": self.transcript,
             "source": self.source,
             "attempts": self.attempts,
             "compiler_logs": self.compiler_logs,
         }
-        payload.update(self.build.to_json())
+        payload.update(self.build.to_json(include_hex=include_hex))
         return payload
 
 
