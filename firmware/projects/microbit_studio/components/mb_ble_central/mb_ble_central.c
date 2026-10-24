@@ -51,6 +51,7 @@ static uint8_t s_own_addr_type;
 static uint16_t s_round;             /* completed probe rounds, for the log */
 static uint16_t s_chr_val_handle;    /* discovered value handle, 0 = none */
 static uint16_t s_svc_end_handle;    /* end of the partial-flash service */
+static bool s_cccd_pending;          /* subscribe write started for this round */
 
 void ble_store_config_init(void); /* provided by the NimBLE port */
 
@@ -137,17 +138,23 @@ static int mb_ble_on_dsc_disc(uint16_t conn_handle, const struct ble_gatt_error 
         if (dsc != NULL && ble_uuid_u16(&dsc->uuid.u) == BLE_GATT_DSC_CLT_CFG_UUID16) {
             /* Subscribe: notifications on (0x0001, little-endian). */
             const uint8_t cccd[2] = {1, 0};
+            s_cccd_pending = true;
             const int rc = ble_gattc_write_flat(conn_handle, dsc->handle, cccd, sizeof(cccd),
                                                 mb_ble_on_cccd_write, NULL);
             if (rc != 0) {
+                s_cccd_pending = false;
                 ESP_LOGE(TAG, "CCCD subscribe failed to start: rc=%d", rc);
                 ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
             }
         }
         return 0;
     case BLE_HS_EDONE:
-        ESP_LOGW(TAG, "no CCCD under the partial-flash characteristic; cannot subscribe");
-        ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        /* EDONE also follows a successful walk, so only complain when no CCCD
+         * was seen at all — a started subscribe completes on its own callback. */
+        if (!s_cccd_pending) {
+            ESP_LOGW(TAG, "no CCCD under the partial-flash characteristic; cannot subscribe");
+            ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        }
         return 0;
     default:
         ESP_LOGE(TAG, "descriptor discovery failed: status=%d", error->status);
@@ -263,6 +270,7 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
                  ble_att_mtu(event->connect.conn_handle));
         s_chr_val_handle = 0;
         s_svc_end_handle = 0;
+        s_cccd_pending = false;
         if (ble_gattc_disc_svc_by_uuid(event->connect.conn_handle, &k_partial_flash_svc.u,
                                        mb_ble_on_svc_disc, NULL) != 0) {
             ESP_LOGE(TAG, "service discovery failed to start");
