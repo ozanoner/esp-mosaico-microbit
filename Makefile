@@ -5,16 +5,19 @@
 #   make up          start the build service on :8477
 #   make logs        follow the build service log
 #   make firmware    shell inside the ESP-IDF container (mosaico.py lives there)
+#   make firmware-hw same shell, with the board's USB ports exposed
 #   make test        unit tests only
 #   make down        stop everything
 
 SHELL := /bin/bash
 COMPOSE := docker compose
+# Hardware overlay: only for a workstation with the board plugged in.
+COMPOSE_HW := $(COMPOSE) -f compose.yaml -f compose.hw.yaml
 BUILD_SERVICE := $(COMPOSE) run --rm build-service
 PAYLOAD ?= microbit/payloads/hello.ts
 
 .DEFAULT_GOAL := help
-.PHONY: help verify test build up logs down firmware ps clean
+.PHONY: help verify test build up logs down firmware firmware-hw ps clean
 
 help:
 	@grep -E '^#   make' Makefile | sed 's/^#   //'
@@ -39,6 +42,10 @@ logs:
 firmware:
 	$(COMPOSE) up -d mosaico-idf
 	$(COMPOSE) exec mosaico-idf bash -lc 'cd /workspace/firmware && exec bash'
+
+firmware-hw:
+	$(COMPOSE_HW) up -d mosaico-idf
+	$(COMPOSE_HW) exec mosaico-idf bash -lc 'cd /workspace/firmware && exec bash'
 
 ps:
 	$(COMPOSE) ps
