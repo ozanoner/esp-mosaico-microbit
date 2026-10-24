@@ -164,6 +164,7 @@ typedef struct {
 static uint8_t s_tx[MB_FLASH_PACKETS_PER_BLOCK][MB_FLASH_PACKET_BYTES];
 static QueueHandle_t s_txq;
 static SemaphoreHandle_t s_tx_done;
+static volatile int s_write_error; /* last ATT error from a packet write, 0 = none */
 
 static int mb_ble_on_packet_write(uint16_t conn_handle, const struct ble_gatt_error *error,
                                   struct ble_gatt_attr *attr, void *arg)
@@ -174,6 +175,7 @@ static int mb_ble_on_packet_write(uint16_t conn_handle, const struct ble_gatt_er
 
     if (error->status != 0) {
         ESP_LOGE(TAG, "packet write rejected: status=%d", error->status);
+        s_write_error = error->status;
     }
     mb_ble_mark_progress();
     xSemaphoreGive(s_tx_done);
@@ -194,14 +196,23 @@ static void mb_ble_tx_task(void *arg)
                 break;
             }
             (void)xSemaphoreTake(s_tx_done, 0);
+            s_write_error = 0;
             const int rc = ble_gattc_write_flat(s_conn_handle, s_chr_val_handle, batch.data[i],
                                                 MB_FLASH_PACKET_BYTES, mb_ble_on_packet_write, NULL);
             if (rc != 0) {
                 ESP_LOGE(TAG, "packet %u failed to start: rc=%d", i, rc);
+                mb_ble_fail("E3", "the radio refused a packet");
                 break;
             }
             if (xSemaphoreTake(s_tx_done, pdMS_TO_TICKS(2000)) != pdTRUE) {
-                ESP_LOGE(TAG, "packet %u got no response in 2 s", i);
+                /* A chain of missing acks is how a starved link looks, and it
+                 * must end the cycle with a state instead of leaving the panel
+                 * on "F" forever: measured on hardware, gate G4. */
+                mb_ble_fail("E3", "packet ack timed out after 2 s");
+                break;
+            }
+            if (s_write_error != 0) {
+                mb_ble_fail("E3", "the peer rejected a packet");
                 break;
             }
         }
