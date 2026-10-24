@@ -126,10 +126,18 @@ static void post_wav(const uint8_t *wav, size_t len)
     } else {
         const int status = esp_http_client_get_status_code(client);
         reply[0] = 0;
-        const int got = esp_http_client_read_response(client, reply, CONFIG_MB_VOICE_REPLY_BYTES - 1);
-        if (got > 0) {
-            reply[got] = 0;
+        /* Chunked replies report no content length, so read until the client
+         * says there is nothing left. */
+        int total = 0;
+        while (total < CONFIG_MB_VOICE_REPLY_BYTES - 1) {
+            const int got = esp_http_client_read(client, reply + total,
+                                                CONFIG_MB_VOICE_REPLY_BYTES - 1 - total);
+            if (got <= 0) {
+                break;
+            }
+            total += got;
         }
+        reply[total] = 0;
         log_reply(status, reply);
     }
 
