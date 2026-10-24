@@ -83,29 +83,69 @@ static void mb_ble_scan(void);
 
 /* ---- gate G3: transfer helpers ---------------------------------------- */
 
-static void mb_ble_send_packet(const uint8_t *packet)
+/* One ATT request may be in flight at a time, so packets are queued and pumped
+ * from the completion callback rather than written in a burst. */
+static uint8_t s_tx[MB_FLASH_PACKETS_PER_BLOCK][MB_FLASH_PACKET_BYTES];
+static uint8_t s_tx_len;   /* packets queued for the current burst */
+static uint8_t s_tx_next;  /* index of the next packet to send */
+static bool s_tx_busy;     /* an ATT write-with-response is in flight */
+
+static int mb_ble_on_packet_write(uint16_t conn_handle, const struct ble_gatt_error *error,
+                                  struct ble_gatt_attr *attr, void *arg);
+
+static void mb_ble_pump(void)
 {
-    const int rc = ble_gattc_write_no_rsp_flat(s_conn_handle, s_chr_val_handle, packet,
-                                               MB_FLASH_PACKET_BYTES);
-    if (rc != 0) {
-        ESP_LOGE(TAG, "packet write failed rc=%d", rc);
+    if (s_tx_busy || s_tx_next >= s_tx_len) {
+        return;
     }
+
+    s_tx_busy = true;
+    const int rc = ble_gattc_write_flat(s_conn_handle, s_chr_val_handle, s_tx[s_tx_next],
+                                        MB_FLASH_PACKET_BYTES, mb_ble_on_packet_write, NULL);
+    if (rc != 0) {
+        s_tx_busy = false;
+        ESP_LOGE(TAG, "packet %u failed to start: rc=%d", s_tx_next, rc);
+        ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        return;
+    }
+    s_tx_next++;
+}
+
+static int mb_ble_on_packet_write(uint16_t conn_handle, const struct ble_gatt_error *error,
+                                  struct ble_gatt_attr *attr, void *arg)
+{
+    (void)attr;
+    (void)arg;
+
+    s_tx_busy = false;
+    if (error->status != 0) {
+        ESP_LOGE(TAG, "packet write rejected: status=%d", error->status);
+        ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        return 0;
+    }
+    mb_ble_pump();
+    return 0;
+}
+
+static void mb_ble_send_queued(uint8_t count)
+{
+    s_tx_len = count;
+    s_tx_next = 0;
+    mb_ble_pump();
 }
 
 static void mb_ble_send_region_info(uint8_t region)
 {
-    uint8_t packet[MB_FLASH_PACKET_BYTES];
-    mb_flash_build_region_info(packet, region);
-    mb_ble_send_packet(packet);
+    mb_flash_build_region_info(s_tx[0], region);
+    mb_ble_send_queued(1);
 }
 
 static void mb_ble_send_end_of_tx(void)
 {
-    uint8_t packet[MB_FLASH_PACKET_BYTES];
     const uint32_t last = MB_FIXTURE_REGION2_START +
                           (MB_FIXTURE_BLOCK_COUNT - 1u) * MB_FLASH_BLOCK_BYTES;
-    mb_flash_build_end_of_tx(packet, last);
-    mb_ble_send_packet(packet);
+    mb_flash_build_end_of_tx(s_tx[0], last);
+    mb_ble_send_queued(1);
 }
 
 static void mb_ble_send_block(uint32_t index)
@@ -116,18 +156,28 @@ static void mb_ble_send_block(uint32_t index)
         return;
     }
 
-    uint8_t packets[MB_FLASH_PACKETS_PER_BLOCK][MB_FLASH_PACKET_BYTES];
     const uint32_t offset = index * MB_FLASH_BLOCK_BYTES;
-    mb_flash_build_block(packets, MB_FIXTURE_REGION2_START + offset,
+    mb_flash_build_block(s_tx, MB_FIXTURE_REGION2_START + offset,
                          mb_flash_fixture_data() + offset);
 
     for (uint32_t i = 0; i < MB_FLASH_PACKETS_PER_BLOCK; i++) {
         /* The DAL compares data[3] with a counter that runs across the whole
          * transfer (packetCount++) instead of restarting per block, so stamping
          * the running value is what stops the device answering 0xAA on block 2. */
-        packets[i][3] = (uint8_t)(s_packet + i);
-        mb_ble_send_packet(packets[i]);
+        s_tx[i][3] = (uint8_t)(s_packet + i);
     }
+
+    if (index == 0) {
+        /* One dump of the first burst: the address split and the counter are the
+         * two things that silently corrupt a flash, so they are visible in the log. */
+        for (uint32_t i = 0; i < MB_FLASH_PACKETS_PER_BLOCK; i++) {
+            ESP_LOGI(TAG, "pkt%u: %02X %02X %02X %02X | %02X %02X %02X %02X …", (unsigned)i,
+                     s_tx[i][0], s_tx[i][1], s_tx[i][2], s_tx[i][3], s_tx[i][4], s_tx[i][5],
+                     s_tx[i][6], s_tx[i][7]);
+        }
+    }
+
+    mb_ble_send_queued(MB_FLASH_PACKETS_PER_BLOCK);
     s_packet += MB_FLASH_PACKETS_PER_BLOCK;
 }
 
@@ -447,6 +497,9 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
         s_block = 0;
         s_packet = 0;
         s_resyncs = 0;
+        s_tx_busy = false;
+        s_tx_len = 0;
+        s_tx_next = 0;
         if (ble_gattc_disc_svc_by_uuid(event->connect.conn_handle, &k_partial_flash_svc.u,
                                        mb_ble_on_svc_disc, NULL) != 0) {
             ESP_LOGE(TAG, "service discovery failed to start");
