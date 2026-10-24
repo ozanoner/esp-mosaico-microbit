@@ -47,6 +47,20 @@ Reproducibility is a checked property, not a promise: `make verify` fails if the
 template hash, program hash, region-2 range or region-2 bytes differ from
 `microbit/golden/expected.json`. See [docs/reproducibility.md](docs/reproducibility.md).
 
+## Credentials
+
+Nothing secret lives in this repository or in any image. A PAT is optional and
+only needed to push from this checkout:
+
+```sh
+cp .env.example .env     # fill in GITHUB_TOKEN
+set -a; . ./.env; set +a # exports GITHUB_TOKEN for git/gh
+```
+
+`.env` is gitignored **and** dockerignored, so it can never reach a commit or a
+build context. No container reads it: the build-service image builds payloads with
+no credentials of its own.
+
 ## Components
 
 | Path | What it is | Runs on |

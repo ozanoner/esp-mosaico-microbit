@@ -32,6 +32,11 @@ firmware/sdkconfig.old
 firmware/.codex-runs/
 firmware/dependencies.lock
 
+# Secrets
+.env
+.env.local
+!.env.example
+
 # Editors / OS
 .vscode/
 .idea/
