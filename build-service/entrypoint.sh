@@ -3,7 +3,10 @@
 # (offline: the wheels are in the image's uv cache) and then dispatches.
 set -euo pipefail
 
-cd /workspace/build-service
+PROJECT_DIR=/workspace
+SERVICE_DIR=${PROJECT_DIR}/build-service
+
+cd "${SERVICE_DIR}"
 uv sync --frozen --extra dev --offline --quiet
 export PATH="/opt/venv/bin:${PATH}"
 
@@ -12,14 +15,19 @@ case "${1:-serve}" in
         exec python -m mb_build_service.app
         ;;
     verify)
-        exec bash /workspace/scripts/verify.sh
+        exec bash "${PROJECT_DIR}/scripts/verify.sh"
         ;;
     build)
         shift
+        # Paths on the command line are project-relative: `-o build/x.hex`,
+        # `microbit/payloads/y.ts`. Stay in the service directory and they
+        # resolve against build-service/ instead.
+        cd "${PROJECT_DIR}"
         exec python -m mb_build_service.builder "$@"
         ;;
     inspect)
         shift
+        cd "${PROJECT_DIR}"
         exec python -m hexkit inspect "$@"
         ;;
     test)
