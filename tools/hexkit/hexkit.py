@@ -19,6 +19,7 @@ Facts and their sources:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -62,6 +63,9 @@ class Image:
     """A sparse flash image built from Intel HEX records."""
 
     segments: list[Segment] = field(default_factory=list)
+    #: Non-Intel record types seen in the file, kept for inspection only.
+    #: MakeCode writes 0x0A/0x0C/0x0D records that are not flash data.
+    extra_records: dict[int, list[tuple[int, bytes]]] = field(default_factory=dict)
 
     # -- construction ----------------------------------------------------
 
@@ -117,6 +121,25 @@ class Image:
                     return True
         return False
 
+    def read_or_ff(self, address: int, length: int) -> bytes:
+        """Read ``length`` bytes, filling anything absent with 0xFF."""
+        out = bytearray(b"\xff" * length)
+        for segment in self.segments:
+            lo = max(address, segment.start)
+            hi = min(address + length, segment.end)
+            if lo < hi:
+                out[lo - address : hi - address] = segment.data[lo - segment.start : hi - segment.start]
+        return bytes(out)
+
+    def covered_end(self, start: int, ceiling: int) -> int:
+        """Highest covered address in ``[start, ceiling)``."""
+        end = start
+        for segment in self.segments:
+            if segment.start >= ceiling:
+                continue  # e.g. the bootloader living above region 2
+            end = max(end, min(segment.end, ceiling))
+        return end
+
     # -- micro:bit specifics --------------------------------------------
 
     def dal_magic_address(self) -> int:
@@ -152,24 +175,23 @@ class Image:
         embedded = self.find(EMBEDDED_SOURCE_MAGIC)
         if embedded is not None and start <= embedded < ceiling:
             return start, min((embedded // 1024) * 1024 + 1024, ceiling)
-        end = start
-        for segment in self.segments:
-            end = max(end, min(segment.end, ceiling))
+        end = self.covered_end(start, ceiling)
+        # Whole pages: the device erases a page before writing into it, so a
+        # partial final page would drop the rest of that page's contents.
+        end = min(((end + 1023) // 1024) * 1024, ceiling)
         return start, end
 
     def blocks(self) -> list[tuple[int, bytes]]:
         """Return ``[(address, 64 bytes)]`` ready for WRITE_DATA."""
         start, end = self.region2()
-        if not self.covered(start, end):
+        last = self.covered_end(start, REGION2_END + 1)
+        if not self.covered(start, last):
             raise HexError(
-                f"region 2 0x{start:08X}–0x{end - 1:08X} is not contiguous in the hex"
+                f"region 2 payload 0x{start:08X}–0x{last - 1:08X} is not contiguous in the hex"
             )
         out: list[tuple[int, bytes]] = []
         for address in range(start, end, BLOCK_BYTES):
-            chunk = self.read(address, min(BLOCK_BYTES, end - address))
-            if len(chunk) < BLOCK_BYTES:
-                chunk = chunk + b"\xff" * (BLOCK_BYTES - len(chunk))  # unverified on hw
-            out.append((address, chunk))
+            out.append((address, self.read_or_ff(address, BLOCK_BYTES)))
         return out
 
 
@@ -207,6 +229,13 @@ def parse_hex(text: str) -> Image:
             base = int.from_bytes(payload, "big") << 16
         elif record_type in (0x03, 0x05):
             continue  # start addresses are irrelevant for flashing
+        elif record_type in (0x0A, 0x0C, 0x0D):
+            # MakeCode (PXT) extensions. 0x0A carries a 0xC0DE marker block,
+            # 0x0C filler, 0x0D records that are addressed from 0 rather than
+            # from the linear base. None of them is flash data for our purpose:
+            # ignoring them keeps the reconstructed image correct, and the fact
+            # that they were seen is preserved for diagnostics.
+            image.extra_records.setdefault(record_type, []).append((base + address, payload))
         else:
             raise HexError(f"line {number}: unsupported record type 0x{record_type:02X}")
     return image
@@ -225,12 +254,14 @@ def _cmd_inspect(path: Path) -> int:
     template_hash, program_hash = image.hashes()
     start, end = image.region2()
     blocks = image.blocks()
+    region_sha = hashlib.sha256(b"".join(data for _, data in blocks)).hexdigest()
     print(f"file            : {path}")
     print(f"dal magic       : 0x{magic:08X}")
     print(f"template hash   : {template_hash.hex()}")
     print(f"program hash    : {program_hash.hex()}")
     print(f"region 2        : 0x{start:08X}–0x{end - 1:08X} ({(end - start)} B)")
     print(f"blocks          : {len(blocks)} × {BLOCK_BYTES} B")
+    print(f"region sha256   : {region_sha}")
     return 0
 
 

@@ -17,17 +17,16 @@ firmware is untouched, so `recover` keeps working.
 
 ## Build environment: DevContainer only
 
-ESP-IDF is never installed on a host. Use the repository DevContainer, which
-reuses the ESP-IDF 6.2 image already present on the machine:
+ESP-IDF is never installed on a host. The repository provides it as a container
+service, pinned by image digest:
 
 ```sh
-docker compose -f .devcontainer/docker-compose.yml up -d
-docker compose -f .devcontainer/docker-compose.yml exec esp-idf bash
-cd firmware && python3 mosaico.py doctor
+docker compose up -d esp-idf
+docker compose exec esp-idf bash -lc 'cd firmware && python3 mosaico.py doctor'
+make firmware            # same thing, drops you into a shell
 ```
 
-`IDF_IMAGE=<repo>:<tag> docker compose …` overrides the image if a build has to be
-pinned.
+`IDF_IMAGE=<repo>@<digest>` overrides the pin if a build has to move.
 
 ### Measured facts for the current image
 
@@ -63,7 +62,7 @@ Components to add on top of the template:
 |---|---|
 | `mb_payload` | Intel HEX → region-2 64-byte blocks (C port of `tools/hexkit`) |
 | `mb_flash` | NimBLE central + partial-flash client |
-| `brain_client` | HTTPS to the brain service, TLS buffers in PSRAM |
+| `build_service_client` | HTTPS to the build service, TLS buffers in PSRAM |
 | `app_studio` | state machine + GSP scene |
 
 `project init` initialises an independent git repository inside

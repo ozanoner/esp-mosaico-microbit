@@ -13,7 +13,7 @@ to sit between the kid's request and the micro:bit.
                                   (toolchain pinned)            GSP UI, progress, verdict
 ```
 
-## 1. Brain service (`brain/`)
+## 1. Build service (`build-service/`)
 
 One HTTPS endpoint on the LAN box rather than three device-side calls. Rationale:
 the compile already has to live there, one TLS context keeps internal RAM free on
@@ -57,7 +57,7 @@ Device operations go through `mosaico.py` only.
 |---|---|
 | `mb_payload` | Intel HEX → linear image, magic/hash extraction, region-2 64-byte blocks |
 | `mb_flash` | NimBLE central: scan, connect, CCCD, five opcodes, notify-paced blocking, resync |
-| `brain_client` | HTTPS client; TLS allocations in PSRAM |
+| `build_service_client` | HTTPS client; TLS allocations in PSRAM |
 | `app_studio` | State machine + GSP scene on the 480×480 panel |
 
 State machine — every state is a screen, not a log line:

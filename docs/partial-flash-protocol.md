@@ -48,13 +48,19 @@ the expected counter to `blockStart + 4`; the host must jump to the next block
 
 ## v1 flash map and hashes
 
-`lancaster-university/microbit-dal/source/drivers/MicroBitMemoryMap.cpp:48-56`:
+`lancaster-university/microbit-dal/source/drivers/MicroBitMemoryMap.cpp:48-56`
+documents:
 
 | Region | Contents | Range |
 |---|---|---|
 | 0 | SoftDevice | `0x00000–0x18000` |
 | 1 | DAL | `0x18000–0x30000` |
-| 2 | PXT user program | `0x30000–0x3BBFF` (≤ 47.6 KB) |
+| 2 | PXT user program | `0x30000–0x3BBFF` |
+
+⚠️ **Region 2's real start moves.** In an image built by `mkc` 1.3.6 the DAL ends
+at **`0x37400`**, and the magic sits there — not at `0x30000`. Region 1's end is
+`FLASH_PROGRAM_END` from the DAL build, so the client must take the magic address
+from the new image and never hardcode it. Measured values: `build-service/TOOLCHAIN.md`.
 
 `MicroBitMemoryMap::findHashes()` scans pages from `0x30000` for the 16-byte magic
 `708E3B92C615A841C49866C975EE5197`, then:
@@ -99,5 +105,20 @@ Nordic **legacy DFU** (`0xFE59`). Implementations to port rather than invent:
 - Does the partial-flash service answer while a *running app* owns BLE, rather than
   in pairing mode? (gate G2)
 - Is a partial final block accepted when padded with `0xFF` to 64 bytes?
-- Measured throughput: 64 B per notification round-trip ⇒ expected ~1.5–3 kB/s,
-  i.e. ~10–25 s for a typical 10–30 KB region 2.
+- Measured throughput: 64 B per notification round-trip ⇒ expected ~1.5–3 kB/s.
+  Reference payload sizes from a real build: 4096 B (64 blocks) and 6144 B
+  (96 blocks) for the two PoC programs — tens of seconds, not minutes.
+
+## What a real `mkc` 1.3.6 build actually contains
+
+Measured, not assumed:
+
+- record types in `built/binary.hex`: `00` (data), `01` (EOF), `04` (extended
+  linear address), plus MakeCode extensions **`0A` (a `C0DE` marker block),
+  `0C` (filler), `0D` (source records addressed from 0)**. Only `00`/`04` carry
+  flash data; the parser records the others and ignores them.
+- the image spans the whole 256 KB part: SoftDevice, DAL + program, and the
+  bootloader at `0x3C000` plus UICR at `0x10001xxx`. The transfer range is not the
+  image range — it starts at the magic and ends at the last program page.
+- the last page is padded with `0xFF` because the device erases a page before
+  writing into it; sending a partial page would drop the rest of it.

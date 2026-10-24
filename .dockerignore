@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+!.env.example
+.venv
+build
+build-service/.work
+build service/.toolchain
+**/__pycache__
+**/*.pyc
+firmware/build
+firmware/managed_components
+firmware/submodule
+node_modules

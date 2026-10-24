@@ -1,0 +1,47 @@
+# One compose file for both halves of the system.
+#
+#   docker compose up -d build-service            # build box (PoC path, needs nothing else)
+#   docker compose up -d esp-idf          # ESP-IDF toolchain for firmware work
+#   docker compose run --rm build-service verify  # reproducibility check
+#
+# Only Docker is required on the host.
+# No fixed project `name`: compose derives it from the checkout directory, so two
+# clones on one machine (or a fresh clone beside an old one) never fight over the
+# same containers and volumes.
+
+services:
+  build-service:
+    build:
+      context: .
+      dockerfile: build-service/Dockerfile
+    image: esp-mosaico-microbit/build-service:local
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    ports:
+      # Host port is overridable; the container always listens on 8477.
+      - "${BUILD_SERVICE_PORT:-8477}:8477"
+    environment:
+      MB_TOOLCHAIN_ID: mkc-1.3.6
+      MB_PORT: "8477"
+
+  esp-idf:
+    # Pinned by digest: the floating `latest` tag is what this repo was validated
+    # against (IDF 6.2.0, revision ab95e70748f2), but tags move.
+    # Override with IDF_IMAGE=espressif/idf:<tag> when a build must move.
+    image: ${IDF_IMAGE:-espressif/idf@sha256:6ad927cfb85a5fea82da64b00960b01adff4fc6019ffcdb18caa3da642d55343}
+    command: sleep infinity
+    working_dir: /workspace
+    environment:
+      IDF_CCACHE_ENABLE: "1"
+    volumes:
+      - .:/workspace:cached
+      - idf-ccache:/root/.ccache
+      - esp-iris-state:/root/.local/state/esp-mosaico
+    # No `devices:` mappings on purpose: /dev/ttyUSB* does not exist on a build
+    # host, and declaring it makes `docker compose up` fail. Flashing happens on
+    # cirunner, never from a container.
+
+volumes:
+  idf-ccache:
+  esp-iris-state:

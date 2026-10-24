@@ -13,7 +13,7 @@ reference hex built by the web editor at the same version?
 ```sh
 node --version                                  # 20+
 npm install -g makecode
-python -m esp_mb_brain.builder microbit/payloads/hello.ts -o build/hello.hex
+python -m mb_build_service.builder microbit/payloads/hello.ts -o build/hello.hex
 python -m hexkit inspect build/hello.hex        # prints magic address + hashes
 ```
 

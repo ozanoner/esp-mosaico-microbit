@@ -10,9 +10,10 @@ venv/
 build/
 dist/
 
-# Brain: pinned MakeCode toolchain and work dirs (never committed)
-brain/.toolchain/
-brain/.work/
+# Build service: pinned MakeCode toolchain and work dirs (never committed)
+build service/.toolchain/
+build-service/.work/
+node_modules/
 
 # Built artefacts
 *.hex
@@ -30,6 +31,11 @@ firmware/sdkconfig
 firmware/sdkconfig.old
 firmware/.codex-runs/
 firmware/dependencies.lock
+
+# Secrets
+.env
+.env.local
+!.env.example
 
 # Editors / OS
 .vscode/
