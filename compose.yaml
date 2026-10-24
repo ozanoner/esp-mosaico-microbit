@@ -1,7 +1,7 @@
 # One compose file for both halves of the system.
 #
 #   docker compose up -d build-service            # build box (PoC path, needs nothing else)
-#   docker compose up -d esp-idf          # ESP-IDF toolchain for firmware work
+#   docker compose up -d mosaico-idf       # ESP-IDF toolchain for firmware work
 #   docker compose run --rm build-service verify  # reproducibility check
 #
 # Only Docker is required on the host.
@@ -25,7 +25,7 @@ services:
       MB_TOOLCHAIN_ID: mkc-1.3.6
       MB_PORT: "8477"
 
-  esp-idf:
+  mosaico-idf:
     # Pinned by digest: the floating `latest` tag is what this repo was validated
     # against (IDF 6.2.0, revision ab95e70748f2), but tags move.
     # Override with IDF_IMAGE=espressif/idf:<tag> when a build must move.
@@ -38,10 +38,18 @@ services:
       - .:/workspace:cached
       - idf-ccache:/root/.ccache
       - esp-iris-state:/root/.local/state/esp-mosaico
-    # No `devices:` mappings on purpose: /dev/ttyUSB* does not exist on a build
-    # host, and declaring it makes `docker compose up` fail. Flashing happens on
-    # cirunner, never from a container.
+      # The GSP compiler is acquired into /root/.cache at configure time. Without
+      # this volume a re-created container loses it while build/CMakeCache.txt
+      # still points at the old path, and the next configure fails the esp-gsp
+      # contract check.
+      - esp-mosaico-cache:/root/.cache/esp-mosaico
+    # No `devices:` entries here: a build host or CI has no board attached, and a
+    # fixed node that does not exist makes `docker compose up` fail. To flash from
+    # a workstation with the device plugged in, add the hardware overlay:
+    #   docker compose -f compose.yaml -f compose.hw.yaml up -d mosaico-idf
+    # See compose.hw.yaml for why it bind-mounts /dev instead of naming a node.
 
 volumes:
   idf-ccache:
   esp-iris-state:
+  esp-mosaico-cache:

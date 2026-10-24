@@ -66,7 +66,7 @@ no credentials of its own.
 | Path | What it is | Runs on |
 |---|---|---|
 | `build-service/` | HTTP service: MakeCode source in, `.hex` + region hashes out | container (`build-service/Dockerfile`) |
-| `firmware/` | ESP-Mosaico application (NimBLE central + partial-flash client + UI) | ESP32-S31 in the `esp-idf` container |
+| `firmware/` | ESP-Mosaico application (NimBLE central + partial-flash client + UI) | ESP32-S31 in the `mosaico-idf` container |
 | `microbit/` | Pinned MakeCode template, PoC payloads, golden hashes | build input |
 | `tools/hexkit/` | Intel HEX parsing, DAL magic/hash extraction, region-2 block packing | anywhere (reference for the C port) |
 | `docs/` | Architecture, BLE protocol reference, bring-up gates, reproducibility | — |
