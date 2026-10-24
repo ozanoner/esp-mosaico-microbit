@@ -186,3 +186,22 @@ def test_endpoint_uses_asr_for_audio(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["transcript"] == "play a tune"
     assert transcriber.calls == [b"RIFF....WAVE"]
+
+
+def test_asr_failure_is_reported_as_the_asr_message(monkeypatch) -> None:
+    """A quiet room must reach the device as the ASR's own sentence.
+
+    Observed on hardware: `service returned 503 (45 bytes):
+    {"detail":"ASR returned an empty transcript"}` (mb_voice.c log_reply). The
+    device can only show what this response carries, and a hex-laden 500 would
+    tell the user nothing.
+    """
+
+    def failing_transcriber() -> None:
+        raise ProviderError("ASR returned an empty transcript")
+
+    monkeypatch.setattr(app_module, "OpenAiCompatibleTranscriber", lambda cfg: failing_transcriber())
+    client = TestClient(app_module.app)
+    response = client.post("/v1/speak", content=b"RIFF....WAVE", headers={"content-type": "audio/wav"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == "ASR returned an empty transcript"
