@@ -38,9 +38,11 @@ services:
       - .:/workspace:cached
       - idf-ccache:/root/.ccache
       - esp-iris-state:/root/.local/state/esp-mosaico
-    # No `devices:` mappings on purpose: /dev/ttyUSB* does not exist on a build
-    # host, and declaring it makes `docker compose up` fail. Flashing happens on
-    # cirunner, never from a container.
+    # No `devices:` entries here: a build host or CI has no board attached, and a
+    # fixed node that does not exist makes `docker compose up` fail. To flash from
+    # a workstation with the device plugged in, add the hardware overlay:
+    #   docker compose -f compose.yaml -f compose.hw.yaml up -d mosaico-idf
+    # See compose.hw.yaml for why it bind-mounts /dev instead of naming a node.
 
 volumes:
   idf-ccache:
