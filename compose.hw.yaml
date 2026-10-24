@@ -1,23 +1,22 @@
-# Hardware overlay: USB access for a board attached to THIS machine.
+# Hardware overlay: the two micro:bit-facing USB ports of the Mosaico, nothing else.
 #
 #   docker compose -f compose.yaml -f compose.hw.yaml up -d mosaico-idf
-#   docker compose -f compose.yaml -f compose.hw.yaml exec mosaico-idf bash
 #
-# Kept out of compose.yaml on purpose. A build host and CI have no board, and a
-# fixed `devices:` entry for a node that does not exist makes `docker compose up`
-# fail. This overlay is only used on a workstation with the device plugged in.
+# Kept out of compose.yaml because a build host and CI have no board, and a
+# `devices:` entry for a node that does not exist makes `docker compose up` fail.
 #
-# `privileged` + a /dev bind mount, rather than `devices: /dev/ttyACM1`:
-# the ESP32-S31 re-enumerates its USB interfaces on every reset, so a pinned
-# device node disappears mid-operation. ESP-Iris follows the re-enumeration, and
-# that needs the whole USB view, not one node.
+# Deliberately NOT privileged and NOT a /dev bind mount: the container gets two
+# character devices and the cgroup rule that lets it open them (ttyACM is major
+# 166), and nothing else from the host.
 #
-# Scope: a dev machine only, never a shared or build host — privileged lifts the
-# container's device and capability isolation.
+# Known limitation, accepted for the PoC: these paths must exist when the
+# container starts, and if the S31 re-enumerates onto a different number the
+# mount goes stale — `docker compose up -d --force-recreate` re-creates it.
 
 services:
   mosaico-idf:
-    privileged: true
-    volumes:
-      - /dev:/dev
-      - /sys:/sys:ro
+    device_cgroup_rules:
+      - 'c 166:* rmw'
+    devices:
+      - /dev/ttyACM0:/dev/ttyACM0
+      - /dev/ttyACM1:/dev/ttyACM1
