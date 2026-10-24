@@ -178,7 +178,11 @@ static esp_err_t wait_for_ip(void)
 
 static esp_err_t fetch(mb_flash_image_t *out)
 {
-    const size_t src_len = (size_t)(k_payload_end - k_payload_start);
+    /* EMBED_TXTFILES appends a NUL, so the symbol range is one longer than the
+     * source. Sending that byte makes mkc fail with "Invalid character" on the
+     * line after the last one — measured on hardware, gate G4. */
+    const size_t src_capacity = (size_t)(k_payload_end - k_payload_start);
+    const size_t src_len = strnlen((const char *)k_payload_start, src_capacity);
     const size_t body_cap = src_len * 2u + 64u;
     char *body = heap_caps_malloc(body_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (body == NULL) {
