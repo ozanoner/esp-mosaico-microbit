@@ -5,6 +5,8 @@
 #include "esp_log.h"
 #include "iris_ota_support.h"
 #include "iris_screen_mirror.h"
+#include "mb_ble_central.h"
+#include "mb_mem_probe.h"
 #include "nvs_flash.h"
 #include "ui_bundle.h"
 
@@ -42,4 +44,14 @@ void app_main(void)
     /* GSP retains the callback context. Device UI/controller live until reboot;
      * teardown requires quiescing GSP before app_hello_destroy(), then closing UI. */
     ESP_LOGI(TAG, "GSP Hello World ready");
+
+    /* Gate G2: measure internal RAM from here on, then bring BLE up. The probe
+     * task owns its own stack; the GSP owner stays free to service the panel. */
+    mb_mem_probe_start();
+    mb_mem_probe_stage("ui-ready");
+    const esp_err_t ble_err = mb_ble_central_start();
+    if (ble_err != ESP_OK) {
+        ESP_LOGE(TAG, "BLE probe unavailable (%s); UI and Recovery stay up",
+                 esp_err_to_name(ble_err));
+    }
 }
