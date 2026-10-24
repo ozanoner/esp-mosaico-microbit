@@ -1,0 +1,25 @@
+diff --git a/ESP-Iris/components/esp_iris/tools/iris_gateway/cli.py b/ESP-Iris/components/esp_iris/tools/iris_gateway/cli.py
+index df8dd4d..1e586cc 100644
+--- a/ESP-Iris/components/esp_iris/tools/iris_gateway/cli.py
++++ b/ESP-Iris/components/esp_iris/tools/iris_gateway/cli.py
+@@ -893,7 +893,7 @@ def _doctor(args: argparse.Namespace) -> int:
+                 "product": port.product,
+                 "transport": port.transport,
+             }
+-            for port in discover_iris_usb_devices(include_usb_serial_jtag=True)
++            for port in discover_iris_usb_devices(include_usb_serial_jtag=True, include_rom=True)
+         ]
+     except ImportError:
+         report["pyserial"] = False
+diff --git a/ESP-Iris/components/esp_iris/tools/iris_gateway/discovery.py b/ESP-Iris/components/esp_iris/tools/iris_gateway/discovery.py
+index eae522f..82bad7b 100644
+--- a/ESP-Iris/components/esp_iris/tools/iris_gateway/discovery.py
++++ b/ESP-Iris/components/esp_iris/tools/iris_gateway/discovery.py
+@@ -78,6 +78,7 @@ def discover_iris_usb_devices(
+                     serial_number=port.serial_number or "",
+                     product=port.product or "",
+                     transport=(
++                        "rom" if is_rom else
+                         "usb_serial_jtag" if is_usb_serial_jtag else "uart" if is_uart else "usb"
+                     ),
+                     location=getattr(port, "location", None) or "",
