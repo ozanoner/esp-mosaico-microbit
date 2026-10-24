@@ -28,10 +28,13 @@
 
 static const char *TAG = "mb_ble";
 
-/* docs/partial-flash-protocol.md "GATT surface". The characteristic UUID is
- * matched directly: it is unique on the device, and the 128-bit service UUID is
- * the same value with 0x3B10 replaced by 0xD91D, so a service lookup would add a
- * round-trip that proves nothing extra. */
+/* docs/partial-flash-protocol.md "GATT surface". Service first, then its
+ * characteristics, then descriptors inside the service's handle range: NimBLE's
+ * struct ble_gatt_chr carries no end handle (ble_gatt.h:471-479), so a
+ * descriptor range can only come from the service. */
+static const ble_uuid128_t k_partial_flash_svc = BLE_UUID128_INIT(
+    0xa8, 0xa9, 0xdf, 0x22, 0x19, 0xfa, 0x62, 0xa0,
+    0x0a, 0x47, 0x1d, 0x25, 0x1d, 0xd9, 0x7d, 0xe9);
 static const ble_uuid128_t k_partial_flash_chr = BLE_UUID128_INIT(
     0xa8, 0xa9, 0xdf, 0x22, 0x19, 0xfa, 0x62, 0xa0,
     0x0a, 0x47, 0x1d, 0x25, 0x10, 0x3b, 0x7d, 0xe9);
@@ -47,7 +50,7 @@ static const char k_name_prefix[] = "BBC micro:bit";
 static uint8_t s_own_addr_type;
 static uint16_t s_round;             /* completed probe rounds, for the log */
 static uint16_t s_chr_val_handle;    /* discovered value handle, 0 = none */
-static uint16_t s_chr_end_handle;
+static uint16_t s_svc_end_handle;    /* end of the partial-flash service */
 
 void ble_store_config_init(void); /* provided by the NimBLE port */
 
@@ -162,19 +165,17 @@ static int mb_ble_on_chr_disc(uint16_t conn_handle, const struct ble_gatt_error 
     case 0:
         if (chr != NULL && ble_uuid_cmp(&chr->uuid.u, &k_partial_flash_chr.u) == 0) {
             s_chr_val_handle = chr->val_handle;
-            s_chr_end_handle = chr->def_handle + 1;
-            /* The descriptor range is only known once discovery walks past this
-             * characteristic, so the walk continues to EDONE. */
         }
         return 0;
     case BLE_HS_EDONE:
         if (s_chr_val_handle == 0) {
-            ESP_LOGE(TAG, "partial-flash characteristic not found on the peer");
+            ESP_LOGE(TAG, "partial-flash characteristic not found in the service");
             ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
             return 0;
         }
         ESP_LOGI(TAG, "characteristic found: val_handle=%u", s_chr_val_handle);
-        if (ble_gattc_disc_all_dscs(conn_handle, s_chr_val_handle, s_chr_end_handle,
+        /* Descriptors live between the value handle and the end of the service. */
+        if (ble_gattc_disc_all_dscs(conn_handle, s_chr_val_handle, s_svc_end_handle,
                                     mb_ble_on_dsc_disc, NULL) != 0) {
             ESP_LOGE(TAG, "descriptor discovery failed to start");
             ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
@@ -182,6 +183,38 @@ static int mb_ble_on_chr_disc(uint16_t conn_handle, const struct ble_gatt_error 
         return 0;
     default:
         ESP_LOGE(TAG, "characteristic discovery failed: status=%d", error->status);
+        ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        return 0;
+    }
+}
+
+static int mb_ble_on_svc_disc(uint16_t conn_handle, const struct ble_gatt_error *error,
+                              const struct ble_gatt_svc *service, void *arg)
+{
+    (void)arg;
+
+    switch (error->status) {
+    case 0:
+        if (service != NULL) {
+            s_svc_end_handle = service->end_handle;
+            ESP_LOGI(TAG, "service found: handles %u..%u", service->start_handle,
+                     service->end_handle);
+        }
+        return 0;
+    case BLE_HS_EDONE:
+        if (s_svc_end_handle == 0) {
+            ESP_LOGE(TAG, "partial-flash service not found on the peer");
+            ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            return 0;
+        }
+        if (ble_gattc_disc_all_chrs(conn_handle, 1, s_svc_end_handle, mb_ble_on_chr_disc,
+                                    NULL) != 0) {
+            ESP_LOGE(TAG, "characteristic discovery failed to start");
+            ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        }
+        return 0;
+    default:
+        ESP_LOGE(TAG, "service discovery failed: status=%d", error->status);
         ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
         return 0;
     }
@@ -229,10 +262,10 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
         ESP_LOGI(TAG, "connected: conn_handle=%u mtu=%u", event->connect.conn_handle,
                  ble_att_mtu(event->connect.conn_handle));
         s_chr_val_handle = 0;
-        s_chr_end_handle = 0;
-        if (ble_gattc_disc_all_chrs(event->connect.conn_handle, 1, 0xFFFF, mb_ble_on_chr_disc,
-                                    NULL) != 0) {
-            ESP_LOGE(TAG, "characteristic discovery failed to start");
+        s_svc_end_handle = 0;
+        if (ble_gattc_disc_svc_by_uuid(event->connect.conn_handle, &k_partial_flash_svc.u,
+                                       mb_ble_on_svc_disc, NULL) != 0) {
+            ESP_LOGE(TAG, "service discovery failed to start");
             ble_gap_terminate(event->connect.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
         }
         return 0;
