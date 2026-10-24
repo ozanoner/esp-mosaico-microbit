@@ -437,6 +437,7 @@ esp_err_t mb_voice_start(mb_event_fn status, mb_voice_done_fn on_captured)
         ESP_LOGW(TAG, "could not start the WiFi task");
     }
 
+    s_event = status;
     s_done = on_captured;
     s_pressed = xSemaphoreCreateBinary();
     if (s_pressed == NULL) {

@@ -121,7 +121,7 @@
       "y": 112,
       "w": 288,
       "h": 196,
-      "image": "assets/trophy.gif",
+      "image": "assets/trophy-still.png",
       "fit": "contain",
       "max_fps": 15,
       "animation_codec": "lossless",
