@@ -132,6 +132,19 @@ esp_gsp_err_t app_hello_read(app_hello_handle_t handle, app_hello_snapshot_t *ou
     return ESP_GSP_OK;
 }
 
+esp_gsp_err_t app_hello_set_state(app_hello_handle_t handle, const char *text)
+{
+    if (!handle || !text) {
+        return ESP_GSP_ERR_INVALID_ARG;
+    }
+    /* Any task may call this: GSP queues the update for the render task and
+     * copies the string before returning (esp_gsp.h:351-362). That is what
+     * makes it usable from the fetch and BLE tasks without marshalling. */
+    const esp_gsp_err_t err = gsp_hello_count_set_text(handle->ui, text);
+    remember_error(handle, err);
+    return err;
+}
+
 esp_gsp_err_t app_hello_destroy(app_hello_handle_t *handle)
 {
     if (!handle) {

@@ -34,6 +34,19 @@ esp_gsp_err_t app_hello_read(app_hello_handle_t handle, app_hello_snapshot_t *ou
  * Returns ESP_GSP_OK or a GSP error; retains the handle if cleanup fails. */
 esp_gsp_err_t app_hello_destroy(app_hello_handle_t *handle);
 
+/** Show a short status token in the scene's text label (gate G4, temporary).
+ *
+ * The studio state machine (issue #7) replaces this. Until then it is the only
+ * text surface the retained Hello scene has, and it is what keeps a failed
+ * flash from being a silent one.
+ *
+ * Safe from any task: GSP applies state updates on the render task and copies
+ * the string before returning (esp_gsp.h:351-362). A button press during a run
+ * still rewrites the same label, so this is for bench use, not for the product.
+ * Returns ESP_GSP_OK, ESP_GSP_ERR_INVALID_ARG, or the setter's error.
+ */
+esp_gsp_err_t app_hello_set_state(app_hello_handle_t handle, const char *text);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,0 +1,40 @@
+menu "micro:bit BLE central (mb_ble_central)"
+
+    config MB_BLE_POC_CYCLES
+        int "Gate G4: build→flash→verify cycles to run back to back"
+        default 10
+        range 1 100
+        help
+            A cycle completes when REGION_INFO region 2 matches the image's
+            program_hash. Only the cycle that actually differs writes; the rest
+            prove the reconnect ritual — no A+B tap, no power cycle in between.
+
+    config MB_BLE_PEER_TIMEOUT_S
+        int "Seconds to wait for a micro:bit before reporting E4 on screen"
+        default 60
+        range 5 600
+        help
+            The scan runs forever; this only decides when the panel says the
+            board was never found, instead of showing no state at all.
+
+    config MB_BLE_CYCLE_GAP_MS
+        int "Milliseconds to wait before scanning for the next cycle"
+        default 5000
+        range 0 30000
+        help
+            The micro:bit resets itself after END_OF_TX and its GATT server is
+            slow to answer right after that boot, so the next scan waits rather
+            than racing it.
+
+    config MB_BLE_ACK_TIMEOUT_MS
+        int "Milliseconds to wait for the ATT response to one packet"
+        default 5000
+        range 500 30000
+        help
+            Measured: a warm board answers each 64-byte block in ~480 ms, so a
+            whole 96-block transfer takes ~45 s; the very first packet of a cold
+            board answered 300 ms after a 2 s deadline. 5 s is margin over the
+            measured tail, not a way to hide a stuck link — a lost response
+            still ends the cycle with E3.
+
+endmenu

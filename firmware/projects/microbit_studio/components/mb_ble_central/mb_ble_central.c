@@ -17,6 +17,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -25,7 +26,6 @@
 #include "host/ble_gatt.h"
 #include "host/ble_hs.h"
 #include "host/util/util.h"
-#include "mb_fixture.h"
 #include "mb_flash.h"
 #include "mb_mem_probe.h"
 #include "nimble/nimble_port.h"
@@ -79,12 +79,73 @@ static uint16_t s_conn_handle;
 static uint32_t s_block;    /* index of the next block to send */
 static uint32_t s_packet;   /* transfer-wide packet counter, per the DAL */
 static uint32_t s_resyncs;
-static bool s_flashed;      /* a transfer completed on this boot */
 static bool s_flash_done;   /* stop flashing, fall back to the STATUS probe */
+
+/* ---- gate G4: the cycle driver -----------------------------------------
+ *
+ * The image is fetched once from POST /v1/build?region2=true and flashed once
+ * per cycle. Every cycle writes: a cycle that only re-read a matching hash
+ * would prove nothing about what the gate is about — a flash that needs no A+B
+ * tap afterwards and no power cycle in between.
+ *
+ *   connect → region 1 → region 2 → stream N blocks → END_OF_TX
+ *   (device resets, link drops) → reconnect → region 1 → region 2 == program?
+ *        yes → cycle verified → next cycle, or POC DONE
+ *        no  → FAILED, screen shows E3
+ */
+static const mb_flash_image_t *s_image;
+static mb_flash_status_fn s_status;
+static uint32_t s_cycle;        /* cycles verified so far */
+static bool s_await_verify;     /* a transfer landed; this connection verifies it */
+static bool s_peer_seen;        /* a micro:bit answered at least once */
+
+static void mb_ble_status(const char *text)
+{
+    if (s_status != NULL) {
+        s_status(text);
+    }
+}
+
+static void mb_ble_fail(const char *state, const char *why)
+{
+    ESP_LOGE(TAG, "FAILED: %s", why);
+    mb_ble_status(state);
+    s_flash_done = true;
+    ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+}
 
 void ble_store_config_init(void); /* provided by the NimBLE port */
 
 static void mb_ble_scan(void);
+
+/* The micro:bit resets itself after END_OF_TX, and its partial-flash service
+ * rejects a write that arrives before the DAL has settled: cycle 2 of every run
+ * failed 2.6 s in with status=7 (invalid attribute value length), while cycle 1
+ * — against a board that had been up for 11 minutes — streamed all 96 blocks.
+ * So the next scan waits CONFIG_MB_BLE_CYCLE_GAP_MS instead of racing the boot.
+ *
+ * A timer, not a delay: this is called from the GAP and GATT callbacks, which
+ * run on the NimBLE host task, and sleeping there stops HCI processing for the
+ * whole stack. */
+static esp_timer_handle_t s_scan_timer;
+
+static void mb_ble_scan_timer_cb(void *arg)
+{
+    (void)arg;
+    mb_ble_scan();
+}
+
+static void mb_ble_scan_soon(uint32_t delay_ms)
+{
+    if (s_scan_timer == NULL) {
+        mb_ble_scan();
+        return;
+    }
+    (void)esp_timer_stop(s_scan_timer);
+    if (esp_timer_start_once(s_scan_timer, (uint64_t)delay_ms * 1000u) != ESP_OK) {
+        mb_ble_scan();
+    }
+}
 
 /* A task-watchdog reset leaves no panic and no coredump, so the interesting
  * 5 s — where the BLE path stops moving — is invisible after the fact. This
@@ -108,6 +169,15 @@ static void mb_ble_watch_task(void *arg)
                      (int)s_connected);
             mb_ble_mark_progress();
         }
+        /* "No state at all" is not a state the panel can show: if no micro:bit
+         * ever answered, say so once rather than scanning forever in silence. */
+        if (!s_peer_seen &&
+            esp_log_timestamp() > (uint32_t)CONFIG_MB_BLE_PEER_TIMEOUT_S * 1000u) {
+            ESP_LOGE(TAG, "no micro:bit within %d s; check the board is advertising",
+                     CONFIG_MB_BLE_PEER_TIMEOUT_S);
+            mb_ble_status("E4");
+            s_peer_seen = true; /* report once */
+        }
     }
 }
 
@@ -124,6 +194,7 @@ typedef struct {
 static uint8_t s_tx[MB_FLASH_PACKETS_PER_BLOCK][MB_FLASH_PACKET_BYTES];
 static QueueHandle_t s_txq;
 static SemaphoreHandle_t s_tx_done;
+static volatile int s_write_error; /* last ATT error from a packet write, 0 = none */
 
 static int mb_ble_on_packet_write(uint16_t conn_handle, const struct ble_gatt_error *error,
                                   struct ble_gatt_attr *attr, void *arg)
@@ -134,6 +205,7 @@ static int mb_ble_on_packet_write(uint16_t conn_handle, const struct ble_gatt_er
 
     if (error->status != 0) {
         ESP_LOGE(TAG, "packet write rejected: status=%d", error->status);
+        s_write_error = error->status;
     }
     mb_ble_mark_progress();
     xSemaphoreGive(s_tx_done);
@@ -154,14 +226,24 @@ static void mb_ble_tx_task(void *arg)
                 break;
             }
             (void)xSemaphoreTake(s_tx_done, 0);
+            s_write_error = 0;
             const int rc = ble_gattc_write_flat(s_conn_handle, s_chr_val_handle, batch.data[i],
                                                 MB_FLASH_PACKET_BYTES, mb_ble_on_packet_write, NULL);
             if (rc != 0) {
                 ESP_LOGE(TAG, "packet %u failed to start: rc=%d", i, rc);
+                mb_ble_fail("E3", "the radio refused a packet");
                 break;
             }
-            if (xSemaphoreTake(s_tx_done, pdMS_TO_TICKS(2000)) != pdTRUE) {
-                ESP_LOGE(TAG, "packet %u got no response in 2 s", i);
+            if (xSemaphoreTake(s_tx_done, pdMS_TO_TICKS(CONFIG_MB_BLE_ACK_TIMEOUT_MS)) != pdTRUE) {
+                /* Measured on hardware: the ATT response to the first packet of
+                 * a cold board arrived 300 ms *after* a 2 s deadline, and a
+                 * warm board answers each block in ~480 ms. 2 s was the bug,
+                 * not the link. */
+                mb_ble_fail("E3", "packet ack timed out");
+                break;
+            }
+            if (s_write_error != 0) {
+                mb_ble_fail("E3", "the peer rejected a packet");
                 break;
             }
         }
@@ -186,23 +268,21 @@ static void mb_ble_send_region_info(uint8_t region)
 
 static void mb_ble_send_end_of_tx(void)
 {
-    const uint32_t last = MB_FIXTURE_REGION2_START +
-                          (MB_FIXTURE_BLOCK_COUNT - 1u) * MB_FLASH_BLOCK_BYTES;
+    const uint32_t last = s_image->region2_start +
+                          (s_image->block_count - 1u) * MB_FLASH_BLOCK_BYTES;
     mb_flash_build_end_of_tx(s_tx[0], last);
     mb_ble_enqueue(1);
 }
 
 static void mb_ble_send_block(uint32_t index)
 {
-    if ((index + 1u) * MB_FLASH_BLOCK_BYTES > mb_flash_fixture_len()) {
-        ESP_LOGE(TAG, "block %u is past the %u-byte fixture", (unsigned)index,
-                 (unsigned)mb_flash_fixture_len());
+    const uint32_t offset = index * MB_FLASH_BLOCK_BYTES;
+    if (offset + MB_FLASH_BLOCK_BYTES > s_image->len) {
+        mb_ble_fail("E3", "block index past the fetched image");
         return;
     }
 
-    const uint32_t offset = index * MB_FLASH_BLOCK_BYTES;
-    mb_flash_build_block(s_tx, MB_FIXTURE_REGION2_START + offset,
-                         mb_flash_fixture_data() + offset);
+    mb_flash_build_block(s_tx, s_image->region2_start + offset, s_image->data + offset);
 
     for (uint32_t i = 0; i < MB_FLASH_PACKETS_PER_BLOCK; i++) {
         /* The DAL compares data[3] with a counter that runs across the whole
@@ -225,21 +305,42 @@ static void mb_ble_send_block(uint32_t index)
     s_packet += MB_FLASH_PACKETS_PER_BLOCK;
 }
 
+/* A cycle is done either way: a transfer that landed, or a region 2 that
+ * already held the program. Only the first cycle of a run normally writes —
+ * rewriting an image that is already correct is what turned a lost ack into a
+ * corrupt region 2, and the gate is about the reconnect ritual, not about
+ * wearing the flash. */
+static void mb_ble_cycle_verified(const char *how)
+{
+    ++s_cycle;
+    s_round++;
+    ESP_LOGI(TAG, "cycle %u/%u VERIFIED (%s)", (unsigned)s_cycle,
+             (unsigned)CONFIG_MB_BLE_POC_CYCLES, how);
+    if (s_cycle < CONFIG_MB_BLE_POC_CYCLES) {
+        s_await_verify = false;
+        ESP_LOGI(TAG, "starting cycle %u/%u; disconnecting to rescan",
+                 (unsigned)(s_cycle + 1), (unsigned)CONFIG_MB_BLE_POC_CYCLES);
+        ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        return;
+    }
+    ESP_LOGI(TAG, "POC DONE %u/%u cycles verified with no manual reset",
+             (unsigned)s_cycle, (unsigned)CONFIG_MB_BLE_POC_CYCLES);
+    mb_ble_status("OK");
+    s_flash_done = true;
+    ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+}
+
 static void mb_ble_region_answered(const mb_flash_notify_t *note)
 {
-    static const uint8_t k_template[8] = MB_FIXTURE_TEMPLATE_HASH_INIT;
-    static const uint8_t k_program[8] = MB_FIXTURE_PROGRAM_HASH_INIT;
-
     if (note->region == MB_FLASH_REGION_DAL) {
         ESP_LOGI(TAG, "region 1 (DAL) hash %02X%02X%02X%02X%02X%02X%02X%02X", note->hash[0],
                  note->hash[1], note->hash[2], note->hash[3], note->hash[4], note->hash[5],
                  note->hash[6], note->hash[7]);
-        if (memcmp(note->hash, k_template, sizeof(k_template)) != 0) {
+        if (memcmp(note->hash, s_image->template_hash, sizeof(s_image->template_hash)) != 0) {
             /* The device refuses a mismatched DAL anyway; refusing here keeps the
              * failure at "we did not write" instead of a half-transfer. */
-            ESP_LOGE(TAG, "DAL hash differs from our image: refusing to write");
-            s_flash_done = true;
-            ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            mb_ble_fail("E2", "DAL hash differs from our image: refusing to write "
+                              "(the board needs one USB bootstrap flash first)");
             return;
         }
         ESP_LOGI(TAG, "DAL matches our template hash");
@@ -253,23 +354,30 @@ static void mb_ble_region_answered(const mb_flash_notify_t *note)
         return;
     }
 
-    if (memcmp(note->hash, k_program, sizeof(k_program)) == 0) {
-        if (s_flashed) {
-            ESP_LOGI(TAG, "VERIFIED: region 2 now holds our program "
-                          "(0x%05X-0x%05X)", MB_FIXTURE_REGION2_START,
-                     MB_FIXTURE_REGION2_END - 1u);
-        } else {
-            ESP_LOGI(TAG, "region 2 already holds our program; nothing to flash");
+    const bool holds_ours = memcmp(note->hash, s_image->program_hash,
+                                   sizeof(s_image->program_hash)) == 0;
+    ESP_LOGI(TAG, "region 2 hash %02X%02X%02X%02X%02X%02X%02X%02X (%s our program)", note->hash[0],
+             note->hash[1], note->hash[2], note->hash[3], note->hash[4], note->hash[5],
+             note->hash[6], note->hash[7], holds_ours ? "holds" : "differs from");
+
+    if (s_await_verify) {
+        if (!holds_ours) {
+            mb_ble_fail("E3", "region 2 does not hold the program after the transfer");
+            return;
         }
-        s_flash_done = true;
-        s_round++;
-        ESP_LOGI(TAG, "round %u complete, disconnecting", s_round);
-        ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        mb_ble_cycle_verified("after the transfer");
         return;
     }
 
-    ESP_LOGI(TAG, "region 2 differs; streaming %u blocks from 0x%05X",
-             (unsigned)MB_FIXTURE_BLOCK_COUNT, MB_FIXTURE_REGION2_START);
+    if (holds_ours) {
+        mb_ble_cycle_verified("region 2 already holds the program, no write");
+        return;
+    }
+
+    ESP_LOGI(TAG, "cycle %u/%u: streaming %u blocks from 0x%05X",
+             (unsigned)(s_cycle + 1), (unsigned)CONFIG_MB_BLE_POC_CYCLES,
+             (unsigned)s_image->block_count, s_image->region2_start);
+    mb_ble_status("F");
     s_phase = MB_PHASE_STREAM;
     s_block = 0;
     s_packet = 0;
@@ -295,16 +403,19 @@ static void mb_ble_handle_notify(const struct os_mbuf *om)
             return;
         }
         s_block++;
-        if (s_block < MB_FIXTURE_BLOCK_COUNT) {
+        if (s_block < s_image->block_count) {
             if ((s_block % 16u) == 0) {
                 ESP_LOGI(TAG, "flashing %u/%u blocks", (unsigned)s_block,
-                         (unsigned)MB_FIXTURE_BLOCK_COUNT);
+                         (unsigned)s_image->block_count);
             }
             mb_ble_send_block(s_block);
         } else {
             ESP_LOGI(TAG, "all %u blocks acknowledged (%u resyncs); END_OF_TX",
-                     (unsigned)MB_FIXTURE_BLOCK_COUNT, (unsigned)s_resyncs);
+                     (unsigned)s_image->block_count, (unsigned)s_resyncs);
             s_phase = MB_PHASE_END;
+            /* The device strips the source magic and resets; the link drops.
+             * The next connection is what proves the write landed. */
+            s_await_verify = true;
             mb_ble_send_end_of_tx();
         }
         return;
@@ -318,10 +429,8 @@ static void mb_ble_handle_notify(const struct os_mbuf *om)
         s_block++;
         ESP_LOGW(TAG, "device reported out-of-order; skipping to block %u",
                  (unsigned)s_block);
-        if (s_resyncs > 4 || s_block >= MB_FIXTURE_BLOCK_COUNT) {
-            ESP_LOGE(TAG, "transfer abandoned after %u resyncs", (unsigned)s_resyncs);
-            s_flash_done = true;
-            ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        if (s_resyncs > 4 || s_block >= s_image->block_count) {
+            mb_ble_fail("E3", "transfer abandoned after too many resyncs");
             return;
         }
         /* The device set its counter to the next block boundary; match it. */
@@ -534,6 +643,7 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
         }
         ESP_LOGI(TAG, "connected: conn_handle=%u mtu=%u", event->connect.conn_handle,
                  ble_att_mtu(event->connect.conn_handle));
+        s_peer_seen = true;
         s_chr_val_handle = 0;
         s_svc_end_handle = 0;
         s_cccd_pending = false;
@@ -557,10 +667,10 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_DISCONNECT:
         s_connected = false;
         ESP_LOGW(TAG, "disconnected: reason=%d", event->disconnect.reason);
-        /* No delay here: this callback runs on the NimBLE host task, and
-         * sleeping in it stops HCI processing for the whole stack. Scanning
-         * again immediately is enough of a back-off. */
-        mb_ble_scan();
+        /* No delay in this callback: it runs on the NimBLE host task, and
+         * sleeping here stops HCI processing for the whole stack. The gap the
+         * micro:bit needs after its own reset is a timer instead. */
+        mb_ble_scan_soon(s_flash_done ? 0u : CONFIG_MB_BLE_CYCLE_GAP_MS);
         return 0;
 
     case BLE_GAP_EVENT_MTU:
@@ -647,11 +757,19 @@ static void mb_ble_task(void *param)
     vTaskDelete(NULL);
 }
 
-esp_err_t mb_ble_central_start(void)
+esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_flash_status_fn status)
 {
     if (s_started) {
         return ESP_ERR_INVALID_STATE;
     }
+    if (image == NULL || image->data == NULL || image->block_count == 0) {
+        ESP_LOGE(TAG, "no image to flash: the build client must fetch one first");
+        return ESP_ERR_INVALID_ARG;
+    }
+    s_image = image;
+    s_status = status;
+    s_cycle = 0;
+    s_await_verify = false;
 
     /* NimBLE narrates every GAP/GATT procedure at INFO, which buries our own
      * lines: a single flash transfer produced ~3000 log lines of which ~40 were
@@ -670,6 +788,14 @@ esp_err_t mb_ble_central_start(void)
     if (s_txq == NULL || s_tx_done == NULL) {
         ESP_LOGE(TAG, "could not allocate the tx queue");
         return ESP_ERR_NO_MEM;
+    }
+    const esp_timer_create_args_t timer_args = {
+        .callback = mb_ble_scan_timer_cb,
+        .name = "mb_ble_gap",
+    };
+    if (esp_timer_create(&timer_args, &s_scan_timer) != ESP_OK) {
+        ESP_LOGW(TAG, "no timer for the inter-cycle gap; scans stay immediate");
+        s_scan_timer = NULL;
     }
     if (xTaskCreate(mb_ble_tx_task, "mb_ble_tx", 4096, NULL, 4, NULL) != pdPASS) {
         ESP_LOGE(TAG, "could not start the tx task");

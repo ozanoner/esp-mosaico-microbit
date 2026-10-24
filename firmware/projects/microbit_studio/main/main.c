@@ -6,6 +6,8 @@
 #include "iris_ota_support.h"
 #include "iris_screen_mirror.h"
 #include "mb_ble_central.h"
+#include "mb_build_client.h"
+#include "mb_flash.h"
 #include "mb_mem_probe.h"
 #include "mb_voice.h"
 #include "nvs_flash.h"
@@ -18,6 +20,29 @@ static struct {
     esp_gsp_handle_t ui;
     app_hello_handle_t controller;
 } application;
+
+/* Gate G4 status tokens, until the studio UI (issue #7) owns these states.
+ * The scene has one text label; app_hello owns it, so the write goes through
+ * that component rather than reaching for GSP here. */
+static void show_state(const char *text)
+{
+    const esp_gsp_err_t err = app_hello_set_state(application.controller, text);
+    if (err != ESP_GSP_OK) {
+        ESP_LOGW(TAG, "state '%s' not shown (0x%x)", text, err);
+    }
+}
+
+/* Called on the fetch task once the image is in PSRAM; the bytes stay valid
+ * for the rest of the boot, which is what the flash driver borrows. */
+static void on_image(const mb_flash_image_t *image)
+{
+    const esp_err_t err = mb_ble_central_start(image, show_state);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "BLE central unavailable (%s); UI and Recovery stay up",
+                 esp_err_to_name(err));
+        show_state("E1");
+    }
+}
 
 void app_main(void)
 {
@@ -46,21 +71,23 @@ void app_main(void)
      * teardown requires quiescing GSP before app_hello_destroy(), then closing UI. */
     ESP_LOGI(TAG, "GSP Hello World ready");
 
-    /* Gate G2: measure internal RAM from here on, then bring BLE up. The probe
-     * task owns its own stack; the GSP owner stays free to service the panel. */
+    /* Gate G2/G3: measure internal RAM, then push-to-talk. Voice comes first
+     * because it brings the WiFi station up; the build client only waits for an
+     * address. A failure here must not take the UI or Recovery down. */
     mb_mem_probe_start();
     mb_mem_probe_stage("ui-ready");
-    const esp_err_t ble_err = mb_ble_central_start();
-    if (ble_err != ESP_OK) {
-        ESP_LOGE(TAG, "BLE probe unavailable (%s); UI and Recovery stay up",
-                 esp_err_to_name(ble_err));
-    }
-
-    /* Gate G3: push-to-talk. Hold the AI button, release to send the clip to
-     * POST /v1/speak. Failure here must not take the UI or Recovery down. */
     const esp_err_t voice_err = mb_voice_start();
     if (voice_err != ESP_OK) {
         ESP_LOGE(TAG, "push-to-talk unavailable (%s)", esp_err_to_name(voice_err));
+    }
+
+    /* Gate G4: fetch the compiled image, then run the flash→verify cycles. The
+     * fetch takes tens of seconds, so it owns a task and the panel shows 'b'
+     * while it happens. */
+    const esp_err_t build_err = mb_build_client_start(show_state, on_image);
+    if (build_err != ESP_OK) {
+        ESP_LOGE(TAG, "build client unavailable (%s); UI and Recovery stay up",
+                 esp_err_to_name(build_err));
     }
 
     /* Publish HEALTHY only now that the product's own subsystems are up.

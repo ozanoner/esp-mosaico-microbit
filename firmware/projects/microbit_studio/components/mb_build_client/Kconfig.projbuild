@@ -1,0 +1,27 @@
+menu "micro:bit build client (mb_build_client)"
+
+    config MB_BUILD_SERVICE_URL
+        string "Build service URL for POST /v1/build"
+        default "http://127.0.0.1:8477/v1/build"
+        help
+            The client appends ?region2=true, so the reply is the region-2 byte
+            stream with the geometry in headers — the same shape /v1/speak
+            returns. The device never handles the 1.8 MB base64 hex.
+
+    config MB_BUILD_MAX_BYTES
+        int "Region-2 receive buffer, allocated in PSRAM"
+        default 49152
+        help
+            48 KB is the whole region-2 window of a micro:bit v1 (0x30000-0x3BBFF),
+            so no legal image can overflow it. A smaller buffer is fine for the
+            current payload (6 KB) but turns a bigger program into a rejection.
+
+    config MB_BUILD_IP_TIMEOUT_S
+        int "Seconds to wait for a WiFi address before giving up"
+        default 60
+        range 5 300
+        help
+            WiFi is brought up by mb_voice; this client only waits for the
+            station to have an address before it posts.
+
+endmenu

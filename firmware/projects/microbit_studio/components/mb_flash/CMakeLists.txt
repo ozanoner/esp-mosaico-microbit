@@ -1,5 +1,6 @@
-idf_component_register(SRCS "mb_flash.c" "mb_flash_fixture.c"
-    INCLUDE_DIRS "include"
-    # The image the device streams: only region 2, extracted from a mkc build by
-    # scripts/extract_region2.py. The SoftDevice and DAL are already on the board.
-    EMBED_FILES "mb_fixture.bin")
+idf_component_register(SRCS "mb_flash.c"
+    INCLUDE_DIRS "include")
+# The compiled-in region-2 fixture is gone: since gate G4 the image comes from
+# POST /v1/build?region2=true, so no image bytes live in the application. The
+# generated mb_fixture.h / mb_fixture.bin stay in the tree as the reference the
+# host test and scripts/extract_region2.py --check compare against.
