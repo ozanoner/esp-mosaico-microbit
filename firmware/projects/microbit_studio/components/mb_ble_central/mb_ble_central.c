@@ -16,6 +16,7 @@
 
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "host/ble_gap.h"
@@ -610,6 +611,13 @@ esp_err_t mb_ble_central_start(void)
      * lines: a single flash transfer produced ~3000 log lines of which ~40 were
      * ours. Errors and warnings stay visible; the play-by-play goes away. */
     esp_log_level_set("NimBLE", ESP_LOG_WARN);
+
+    /* Stamp the build and the previous reset cause. Iris only starts logging
+     * after app_main runs, so the ROM/bootloader reason for a restart is
+     * invisible; without this a silent reboot loop looks like nothing happened.
+     */
+    ESP_LOGI(TAG, "probe build %s %s, reset_reason=%d",
+             __DATE__, __TIME__, (int)esp_reset_reason());
 
     /* The host needs its own stack; the caller's task is the GSP/UI owner and
      * must stay free to service the panel. */
