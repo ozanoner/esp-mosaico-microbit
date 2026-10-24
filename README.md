@@ -32,7 +32,7 @@ git clone --recurse-submodules https://github.com/ozanoner/esp-mosaico-microbit
 cd esp-mosaico-microbit
 
 make verify        # tests + rebuild the PoC payload + compare against golden hashes
-make up            # build service on http://localhost:8080/v1/health
+make up            # build service on http://localhost:8477/v1/health
 make build         # build microbit/payloads/hello.ts -> build/hello.hex
 make firmware      # shell with ESP-IDF + mosaico.py (firmware work)
 make test          # unit tests only

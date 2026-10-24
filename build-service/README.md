@@ -10,7 +10,7 @@ Runs as a container; the host needs nothing installed.
 docker compose run --rm build-service verify                    # reproducibility check
 docker compose run --rm build-service build microbit/payloads/hello.ts -o build/hello.hex
 docker compose run --rm build-service inspect build/hello.hex
-docker compose up -d build-service                              # http://localhost:8080
+docker compose up -d build-service                              # http://localhost:8477
 docker compose run --rm build-service shell                     # poke around
 ```
 
@@ -36,6 +36,11 @@ change does.
 | `MB_MKC_BIN` | compiler binary | `mkc` |
 | `MB_TOOLCHAIN_ID` | id reported by `/v1/health` | `mkc-1.3.6` |
 | `MB_BUILD_TIMEOUT_S` | per-build timeout | `180` |
+| `MB_PORT` | port uvicorn listens on | `8477` |
+
+Host-side, `BUILD_SERVICE_PORT` changes which port compose publishes; the container
+always listens on 8477. 8477 is chosen to stay clear of the usual 3000/5000/8000/8080
+defaults so a second service on the same LAN box cannot collide with it.
 
 ## Response shape
 

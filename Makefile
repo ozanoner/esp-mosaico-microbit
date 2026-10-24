@@ -2,7 +2,7 @@
 #
 #   make verify      reproducibility check (tests + rebuild + golden compare)
 #   make build       build a payload to build/<name>.hex
-#   make up          start the build service on :8080
+#   make up          start the build service on :8477
 #   make logs        follow the build service log
 #   make firmware    shell inside the ESP-IDF container (mosaico.py lives there)
 #   make test        unit tests only
@@ -31,7 +31,7 @@ build:
 
 up:
 	$(COMPOSE) up -d --build build-service
-	@echo "build-service: http://localhost:8080/v1/health"
+	@echo "build-service: http://localhost:$${BUILD_SERVICE_PORT:-8477}/v1/health"
 
 logs:
 	$(COMPOSE) logs -f build-service
