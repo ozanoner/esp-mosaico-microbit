@@ -18,6 +18,21 @@ menu "micro:bit voice (mb_voice)"
         int "Reply buffer size in bytes, allocated in PSRAM"
         default 8192
 
+    config MB_WIFI_SSID
+        string "WiFi SSID for the build-service link"
+        default ""
+        help
+            Injected into the generated sdkconfig from .env at build time. Empty
+            falls back to whatever the retained firmware left in NVS.
+
+    config MB_WIFI_PASS
+        string "WiFi password for the build-service link"
+        default ""
+        help
+            Same injection path as the SSID. It ends up inside the installed
+            image, which is acceptable for a bench PoC but would be replaced by
+            per-device provisioning for anything shipped.
+
     config MB_VOICE_SELFTEST_SECONDS
         int "Bench self-test: record this many seconds after boot (0 = off)"
         default 0

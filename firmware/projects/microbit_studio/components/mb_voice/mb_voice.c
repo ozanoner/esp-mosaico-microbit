@@ -192,6 +192,9 @@ static void selftest_task(void *arg);
 
 static void wifi_start(void)
 {
+    /* The WiFi driver logs the SSID and, at debug, association details; keep the
+     * device log free of network identifiers. Warnings and errors still show. */
+    esp_log_level_set("wifi", ESP_LOG_WARN);
     /* Credentials are provisioned once through Vibe Mode
      * (`mosaico.py iris test recovery-wifi`), which stores them in NVS. The app
      * only has to bring the station up with FLASH storage so it picks them up. */
@@ -218,12 +221,47 @@ static void wifi_start(void)
     }
     esp_wifi_set_storage(WIFI_STORAGE_FLASH);
     esp_wifi_set_mode(WIFI_MODE_STA);
+
+    /* Credentials come from .env via Kconfig, so the app does not depend on the
+     * retained firmware's NVS layout. */
+    if (CONFIG_MB_WIFI_SSID[0] != '\0') {
+        wifi_config_t sta = {0};
+        const size_t ssid_len = strnlen(CONFIG_MB_WIFI_SSID, sizeof(sta.sta.ssid));
+        const size_t pass_len = strnlen(CONFIG_MB_WIFI_PASS, sizeof(sta.sta.password));
+        memcpy(sta.sta.ssid, CONFIG_MB_WIFI_SSID, ssid_len);
+        memcpy(sta.sta.password, CONFIG_MB_WIFI_PASS, pass_len);
+        sta.sta.threshold.authmode = pass_len > 0 ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+        err = esp_wifi_set_config(WIFI_IF_STA, &sta);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "wifi config failed: %s", esp_err_to_name(err));
+            return;
+        }
+    }
+
     err = esp_wifi_start();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "wifi start failed: %s", esp_err_to_name(err));
         return;
     }
-    ESP_LOGI(TAG, "WiFi station up; credentials come from NVS");
+    esp_wifi_connect();
+
+    esp_netif_t *sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip;
+    for (int i = 0; i < 40; i++) {
+        if (sta_netif != NULL && esp_netif_get_ip_info(sta_netif, &ip) == ESP_OK && ip.ip.addr != 0) {
+            ESP_LOGI(TAG, "WiFi up: " IPSTR, IP2STR(&ip.ip));
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    ESP_LOGE(TAG, "no IP after 20 s; the service will be unreachable");
+}
+
+static void wifi_task(void *arg)
+{
+    (void)arg;
+    wifi_start();
+    vTaskDelete(NULL);
 }
 
 esp_err_t mb_voice_start(void)
@@ -268,7 +306,10 @@ esp_err_t mb_voice_start(void)
         ESP_LOGW(TAG, "could not set the microphone gain: %s", esp_err_to_name(err));
     }
 
-    wifi_start();
+    /* On its own task: associating can take seconds and the panel must not wait. */
+    if (xTaskCreate(wifi_task, "mb_wifi", 4096, NULL, 4, NULL) != pdPASS) {
+        ESP_LOGW(TAG, "could not start the WiFi task");
+    }
 
     s_pressed = xSemaphoreCreateBinary();
     if (s_pressed == NULL) {
