@@ -606,6 +606,11 @@ esp_err_t mb_ble_central_start(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* NimBLE narrates every GAP/GATT procedure at INFO, which buries our own
+     * lines: a single flash transfer produced ~3000 log lines of which ~40 were
+     * ours. Errors and warnings stay visible; the play-by-play goes away. */
+    esp_log_level_set("NimBLE", ESP_LOG_WARN);
+
     /* The host needs its own stack; the caller's task is the GSP/UI owner and
      * must stay free to service the panel. */
     const BaseType_t created = xTaskCreate(mb_ble_task, "mb_ble", 6144, NULL, 5, NULL);
