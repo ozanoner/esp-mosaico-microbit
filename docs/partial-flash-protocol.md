@@ -33,13 +33,21 @@ to be appended onto the end of the DAL" (v1 and v2 partial-flash docs).
 
 ### The address-split quirk (this one bites)
 
-`source/bluetooth/MicroBitPartialFlashingService.cpp:208-218` assembles the 32-bit
+`source/bluetooth/MicroBitPartialFlashingService.cpp:207-221` assembles the 32-bit
 target address from the **first two packets of each 4-packet block**, not from
 every packet:
 
-- packet 0 → `offset  = (data[1] << 8) | data[2]` (high 16 bits)
-- packet 1 → `offset |= (data[1] << 24) | (data[2] << 16)` (low 16 bits)
+- packet 0 → `offset  = (data[1] << 8) | data[2]` — the **low** 16 bits
+- packet 1 → `offset |= (data[1] << 24) | (data[2] << 16)` — the **high** 16 bits
+- packets 2 and 3 carry no address bytes, and 0 is the value they must hold
 - packets 0–3 each carry 16 bytes → **64 bytes written per block** at that address
+
+So region 2 at `0x37400` is sent as packet 0 `01 74 00 …` and packet 1
+`01 00 03 …`. (An earlier revision of this page had the two halves the other way
+round; the formulas were right and the labels were wrong. Verified against the
+DAL source and pinned by `components/mb_flash/host/test_flash.c`, which asserts
+both packets byte by byte and re-assembles the address with the DAL's own
+expression.)
 
 So the host emits contiguous, 4-byte-aligned 64-byte blocks, with a byte-wide
 packet counter cycling 0..255. On a mismatch the device notifies `01 AA` and sets

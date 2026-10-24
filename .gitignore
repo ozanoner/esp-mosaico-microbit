@@ -41,3 +41,8 @@ firmware/dependencies.lock
 .vscode/
 .idea/
 .DS_Store
+
+# temporary files and directories
+tmp/
+# ESP-Iris Gateway state written into the project by mosaico.py
+.gateway/
