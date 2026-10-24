@@ -2,30 +2,39 @@
 #pragma once
 
 #include "esp_err.h"
+#include "mb_flash.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/** Start the BLE central task (gates G2 and G3).
+/** Start the BLE central and run the gate-G4 cycle loop.
  *
  * Scans for an advertiser whose complete or shortened name starts with
  * `BBC micro:bit`, connects, subscribes to the partial-flash characteristic
- * (`E97D3B10-…`), then runs one of two paths:
+ * (`E97D3B10-…`), then per cycle:
  *
- * - until a transfer has completed: read region 1 and region 2 hashes, refuse to
- *   write if the DAL differs from our image, stream region 2 in 64-byte blocks,
- *   send END_OF_TX, and verify on the next round by re-reading region 2;
- * - afterwards: write `0xEE` and log the STATUS answer, then disconnect and
- *   rescan, so repeated rounds need no reboot.
+ *   read region 1 and region 2 hashes → refuse to write if the DAL differs from
+ *   `image->template_hash` → stream region 2 in 64-byte blocks → END_OF_TX →
+ *   reconnect → re-read region 2 → compare with `image->program_hash`.
+ *
+ * Every cycle writes, so the loop proves what the gate is about: a flash that
+ * needs no A+B tap afterwards and no power cycle in between. The count comes
+ * from CONFIG_MB_BLE_POC_CYCLES; after the last verified cycle the driver falls
+ * back to the gate-G2 STATUS probe and stays quiet.
+ *
+ * `image` is borrowed: the caller owns it and it must outlive every transfer
+ * (the build client keeps it in PSRAM for the lifetime of the boot).
+ * `status` receives a short screen token ("F", "OK", "E2"); NULL is allowed.
  *
  * Returns ESP_OK once the task exists. Every connection outcome — found,
- * connected, subscribed, hashes, blocks, errors — arrives on the UART log, never
- * as a return code: the radio work happens after this call returns.
+ * connected, subscribed, hashes, blocks, errors — arrives on the UART log and
+ * on `status`, never as a return code: the radio work happens after this call
+ * returns.
  *
  * Idempotent: a second call returns ESP_ERR_INVALID_STATE.
  */
-esp_err_t mb_ble_central_start(void);
+esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_flash_status_fn status);
 
 #ifdef __cplusplus
 }

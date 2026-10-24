@@ -1,0 +1,21 @@
+menu "micro:bit BLE central (mb_ble_central)"
+
+    config MB_BLE_POC_CYCLES
+        int "Gate G4: build→flash→verify cycles to run back to back"
+        default 10
+        range 1 100
+        help
+            Each cycle writes region 2 and then proves it by reconnecting and
+            comparing REGION_INFO region 2 against the image's program_hash.
+            A cycle that only re-read a matching hash would not exercise the
+            thing the gate is about, so every cycle streams the image.
+
+    config MB_BLE_PEER_TIMEOUT_S
+        int "Seconds to wait for a micro:bit before reporting E4 on screen"
+        default 60
+        range 5 600
+        help
+            The scan runs forever; this only decides when the panel says the
+            board was never found, instead of showing no state at all.
+
+endmenu

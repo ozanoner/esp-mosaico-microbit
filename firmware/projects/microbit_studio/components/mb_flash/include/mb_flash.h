@@ -98,9 +98,25 @@ void mb_flash_build_end_of_tx(uint8_t out[MB_FLASH_PACKET_BYTES], uint32_t offse
 mb_flash_notify_kind_t mb_flash_parse_notify(const uint8_t *data, size_t length,
                                              mb_flash_notify_t *out);
 
-/** The embedded region-2 image, and its length in bytes. */
-const uint8_t *mb_flash_fixture_data(void);
-uint32_t mb_flash_fixture_len(void);
+/** The region-2 image the flash client streams, and where it came from.
+ *
+ * The bytes arrive from `POST /v1/build?region2=true` (gate G4): `data` points
+ * into PSRAM owned by the build client and must outlive every transfer. The
+ * geometry is the same the build object reports, so a mismatch between the two
+ * is a bug that shows up as a hash compare failing, never as a wrong write.
+ */
+typedef struct {
+    const uint8_t *data;              /**< block_count * MB_FLASH_BLOCK_BYTES bytes. */
+    uint32_t len;                     /**< Bytes in `data`; block_count * 64. */
+    uint32_t region2_start;           /**< First address written, inclusive. */
+    uint32_t region2_end;             /**< One past the last address. */
+    uint32_t block_count;             /**< 64-byte blocks in region 2. */
+    uint8_t template_hash[8];         /**< Region 1 (DAL) hash the image expects. */
+    uint8_t program_hash[8];          /**< Region 2 hash this image must produce. */
+} mb_flash_image_t;
+
+/** Short, screen-sized status token ("F", "OK", "E2"); called from any task. */
+typedef void (*mb_flash_status_fn)(const char *text);
 
 #ifdef __cplusplus
 }
