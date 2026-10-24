@@ -23,9 +23,6 @@ static const char *TAG = "mb_voice";
 #define SAMPLE_RATE 16000
 #define CHANNELS 1
 #define BYTES_PER_SAMPLE 2
-#define CAPTURE_RATE 48000
-#define CAPTURE_CHANNELS 2
-#define DECIMATION (CAPTURE_RATE / SAMPLE_RATE)
 #define WAV_HEADER_BYTES 44u
 #define READ_CHUNK 2048u
 #define CAPACITY ((size_t)SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE * CONFIG_MB_VOICE_MAX_SECONDS)
@@ -35,10 +32,6 @@ static size_t s_pcm_len;
 static volatile bool s_recording;
 static SemaphoreHandle_t s_pressed;
 static esp_codec_dev_handle_t s_mic;
-/* The BSP codec path only produces data at its own rate (48 kHz stereo); asking
- * it for 16 kHz mono yields zero bytes. So capture at the BSP default and
- * decimate by 3 with a box filter to the 16 kHz mono the ASR expects. */
-static int16_t s_chunk[1024 * CAPTURE_CHANNELS];
 
 static void put_le32(uint8_t *p, uint32_t v)
 {
@@ -153,49 +146,19 @@ static void record_task(void *arg)
             continue;
         }
 
-        esp_codec_dev_sample_info_t info = {
-            .sample_rate = CAPTURE_RATE,
-            .bits_per_sample = BYTES_PER_SAMPLE * 8,
-            .channel = CAPTURE_CHANNELS,
-            .channel_mask = 0,
-        };
-        if (esp_codec_dev_open(s_mic, &info) != ESP_CODEC_DEV_OK) {
-            ESP_LOGE(TAG, "could not open the microphone");
-            continue;
-        }
-        esp_codec_dev_set_in_gain(s_mic, 30.0f);
-
         s_pcm_len = 0;
         ESP_LOGI(TAG, "recording (max %d s)", CONFIG_MB_VOICE_MAX_SECONDS);
-        while (s_recording && (s_pcm_len + BYTES_PER_SAMPLE) <= CAPACITY) {
-            const int got = esp_codec_dev_read(s_mic, s_chunk, sizeof(s_chunk));
-            if (got <= 0) {
-                if (got < 0) {
-                    ESP_LOGE(TAG, "microphone read failed (%d)", got);
-                    break;
-                }
+        while (s_recording && (s_pcm_len + READ_CHUNK) <= CAPACITY) {
+            const int got = esp_codec_dev_read(s_mic, s_wav + WAV_HEADER_BYTES + s_pcm_len, READ_CHUNK);
+            if (got > 0) {
+                s_pcm_len += (size_t)got;
+            } else if (got < 0) {
+                ESP_LOGE(TAG, "microphone read failed (%d)", got);
+                break;
+            } else {
                 vTaskDelay(pdMS_TO_TICKS(5));   /* no frames yet; do not spin */
-                continue;
-            }
-            const int frames = got / (CAPTURE_CHANNELS * BYTES_PER_SAMPLE);
-            int32_t acc = 0;
-            int pending = 0;
-            for (int i = 0; i < frames; i++) {
-                acc += s_chunk[i * CAPTURE_CHANNELS];   /* left channel */
-                if (++pending < DECIMATION) {
-                    continue;
-                }
-                const int16_t sample = (int16_t)(acc / DECIMATION);
-                if ((s_pcm_len + BYTES_PER_SAMPLE) > CAPACITY) {
-                    break;
-                }
-                memcpy(s_wav + WAV_HEADER_BYTES + s_pcm_len, &sample, BYTES_PER_SAMPLE);
-                s_pcm_len += BYTES_PER_SAMPLE;
-                acc = 0;
-                pending = 0;
             }
         }
-        esp_codec_dev_close(s_mic);
 
         if (s_pcm_len < READ_CHUNK) {
             ESP_LOGW(TAG, "recording too short (%u bytes), discarded", (unsigned)s_pcm_len);
@@ -225,10 +188,33 @@ esp_err_t mb_voice_start(void)
         return ESP_ERR_NO_MEM;
     }
 
+    /* Same sequence as the tinyml demo's working capture path
+     * (devkits/mosaico/audio_mosaico.cpp:45-78): BSP audio init explicitly, then
+     * one mic opened at 16 kHz mono and left open for the lifetime. */
+    esp_err_t err = bsp_audio_init(NULL);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "BSP audio init failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
     s_mic = bsp_audio_codec_microphone_init();
     if (s_mic == NULL) {
         ESP_LOGE(TAG, "microphone init failed");
         return ESP_FAIL;
+    }
+
+    esp_codec_dev_sample_info_t mic_fs = {0};
+    mic_fs.bits_per_sample = BYTES_PER_SAMPLE * 8;
+    mic_fs.channel = CHANNELS;
+    mic_fs.sample_rate = SAMPLE_RATE;
+    err = esp_codec_dev_open(s_mic, &mic_fs);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "could not open the microphone: %s", esp_err_to_name(err));
+        return err;
+    }
+    err = esp_codec_dev_set_in_gain(s_mic, 30.0f);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "could not set the microphone gain: %s", esp_err_to_name(err));
     }
 
     s_pressed = xSemaphoreCreateBinary();
@@ -238,7 +224,7 @@ esp_err_t mb_voice_start(void)
 
     button_handle_t buttons[BSP_BUTTON_NUM] = {0};
     int count = 0;
-    esp_err_t err = bsp_iot_button_create(buttons, &count, BSP_BUTTON_NUM);
+    err = bsp_iot_button_create(buttons, &count, BSP_BUTTON_NUM);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "button init failed: %s", esp_err_to_name(err));
         return err;
