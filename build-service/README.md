@@ -57,3 +57,25 @@ defaults so a second service on the same LAN box cannot collide with it.
 ```
 
 Measured values for the two PoC payloads: `TOOLCHAIN.md`.
+
+## `POST /v1/idea` — speech (or text) in, compiled image out
+
+The voice entry point. Two content types:
+
+- `audio/wav` (raw body) → ASR → LLM → `mkc` → build object
+- `application/json` `{"text": "..."}` → skips ASR, useful for tests and for a
+  device that has already shown the transcript to a human
+
+Credentials are read from the environment only (`MB_ASR_*`, `MB_LLM_*` in
+`.env`, gitignored and dockerignored). Both providers speak the OpenAI-compatible
+HTTP API with `urllib`, so there is no new runtime dependency and swapping to a
+local vLLM or a LAN gateway is a `.env` change. With no key set, `/v1/idea`
+answers `503` with the missing variable's name; `/v1/health` and `/v1/build`
+keep working.
+
+One retry, with the compiler's own output fed back. If the second attempt also
+fails, the response is `502` carrying `transcript`, `source`, `attempts` and
+`compiler_message`, so the device can display the real error instead of "try
+again". The prompt forbids imports, packages and `pxt.json` changes, and
+requires a `REVISION` constant shown at boot — the DAL hash must not move, or
+the partial-flash service will refuse the image.

@@ -1,0 +1,140 @@
+"""Tests for the idea endpoint: prompt plumbing, the retry loop, honest failure.
+
+No network and no compiler here — the point is the orchestration. The real
+compile path is covered by test_builder.py, which runs the pinned mkc.
+"""
+
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+
+from mb_build_service import app as app_module
+from mb_build_service.builder import Build, BuildError
+from mb_build_service.idea import IdeaError, extract_source, generate_program
+from mb_build_service.providers import (
+    FakeGenerator,
+    FakeTranscriber,
+    LlmConfig,
+    OpenAiCompatibleGenerator,
+    ProviderError,
+)
+
+GOOD = """
+const REVISION = "A1"
+basic.showString(REVISION)
+input.onButtonPressed(Button.A, function () {
+    basic.showIcon(IconNames.Heart)
+})
+"""
+
+
+def stub_build(source: str, *, settings=None) -> Build:
+    return Build(
+        hex_bytes=b":00000001FF\n",
+        sha256="0" * 64,
+        template_hash="08d9ef69355ad697",
+        program_hash="8f007d004500b100",
+        region2_start=0x37400,
+        region2_end=0x38400,
+        block_count=64,
+        toolchain_id="mkc-1.3.6",
+        log="",
+    )
+
+
+def test_extract_source_strips_fences_and_prose() -> None:
+    reply = "Here you go:\n```typescript\n" + GOOD + "\n```\nHope that helps."
+    assert extract_source(reply).lstrip().startswith("const REVISION")
+    assert "```" not in extract_source(reply)
+    assert "Hope that helps" not in extract_source(reply)
+
+
+def test_extract_source_rejects_empty_reply() -> None:
+    with pytest.raises(ValueError):
+        extract_source("   \n  ")
+
+
+def test_success_on_first_attempt() -> None:
+    idea = generate_program("make it show a heart", generator=FakeGenerator(GOOD), build_fn=stub_build)
+    assert idea.attempts == 1
+    assert idea.compiler_logs == []
+    assert idea.build.block_count == 64
+
+
+def test_retry_feeds_the_compiler_message_back() -> None:
+    calls = {"n": 0}
+
+    def flaky(source: str, *, settings=None) -> Build:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise BuildError("mkc build failed (exit 1)", "error: unknown symbol 'IconNamez'")
+        return stub_build(source)
+
+    generator = FakeGenerator(GOOD, GOOD)
+    idea = generate_program("make it show a heart", generator=generator, build_fn=flaky)
+    assert idea.attempts == 2
+    assert len(idea.compiler_logs) == 1
+    assert "IconNamez" in idea.compiler_logs[0]
+    assert "IconNamez" in generator.prompts[1]
+
+
+def test_second_failure_raises_with_the_compiler_message() -> None:
+    def always_fails(source: str, *, settings=None) -> Build:
+        raise BuildError("mkc build failed (exit 1)", "error: cannot find name 'Foo'")
+
+    with pytest.raises(IdeaError) as caught:
+        generate_program("nonsense", generator=FakeGenerator(GOOD, GOOD), build_fn=always_fails)
+    err = caught.value
+    assert err.attempts == 2
+    assert "cannot find name 'Foo'" in err.compiler_message
+    assert err.transcript == "nonsense"
+
+
+def test_empty_transcript_is_rejected() -> None:
+    with pytest.raises(ValueError):
+        generate_program("   ", generator=FakeGenerator(GOOD), build_fn=stub_build)
+
+
+def test_live_provider_requires_a_key() -> None:
+    with pytest.raises(ProviderError):
+        OpenAiCompatibleGenerator(LlmConfig(api_key=""))
+
+
+def test_endpoint_takes_text_and_returns_geometry(monkeypatch) -> None:
+    monkeypatch.setattr(app_module, "OpenAiCompatibleGenerator", lambda cfg: FakeGenerator(GOOD))
+    monkeypatch.setattr(
+        app_module, "generate_program", lambda transcript, **kw: generate_program(transcript, generator=FakeGenerator(GOOD), build_fn=stub_build)
+    )
+    client = TestClient(app_module.app)
+    response = client.post("/v1/idea", json={"text": "show a heart"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["transcript"] == "show a heart"
+    assert body["block_count"] == 64
+    assert body["template_hash"] == "08d9ef69355ad697"
+
+
+def test_endpoint_returns_compiler_message_on_failure(monkeypatch) -> None:
+    def boom(*args, **kwargs):
+        raise IdeaError("show a heart", GOOD, "error: cannot find name 'Foo'", 2)
+
+    monkeypatch.setattr(app_module, "OpenAiCompatibleGenerator", lambda cfg: FakeGenerator(GOOD))
+    monkeypatch.setattr(app_module, "generate_program", boom)
+    client = TestClient(app_module.app)
+    response = client.post("/v1/idea", json={"text": "show a heart"})
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert "cannot find name 'Foo'" in detail["compiler_message"]
+    assert detail["attempts"] == 2
+
+
+def test_endpoint_uses_asr_for_audio(monkeypatch) -> None:
+    transcriber = FakeTranscriber("play a tune")
+    monkeypatch.setattr(app_module, "OpenAiCompatibleTranscriber", lambda cfg: transcriber)
+    monkeypatch.setattr(app_module, "OpenAiCompatibleGenerator", lambda cfg: FakeGenerator(GOOD))
+    client = TestClient(app_module.app)
+    response = client.post("/v1/idea", content=b"RIFF....WAVE", headers={"content-type": "audio/wav"})
+    assert response.status_code == 200
+    assert response.json()["transcript"] == "play a tune"
+    assert transcriber.calls == [b"RIFF....WAVE"]
