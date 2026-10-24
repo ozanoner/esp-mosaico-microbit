@@ -18,6 +18,8 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "host/ble_gap.h"
 #include "host/ble_gatt.h"
@@ -84,61 +86,75 @@ static void mb_ble_scan(void);
 
 /* ---- gate G3: transfer helpers ---------------------------------------- */
 
-/* One ATT request may be in flight at a time, so packets are queued and pumped
- * from the completion callback rather than written in a burst. */
+/* All ATT writes run on a dedicated task. NimBLE callbacks only enqueue:
+ * starting a GATT procedure inside a GATT callback re-enters the client state
+ * machine, and that corruption surfaces as an interrupt-watchdog stall. */
+typedef struct {
+    uint8_t count;
+    uint8_t data[MB_FLASH_PACKETS_PER_BLOCK][MB_FLASH_PACKET_BYTES];
+} mb_tx_batch_t;
+
 static uint8_t s_tx[MB_FLASH_PACKETS_PER_BLOCK][MB_FLASH_PACKET_BYTES];
-static uint8_t s_tx_len;   /* packets queued for the current burst */
-static uint8_t s_tx_next;  /* index of the next packet to send */
-static bool s_tx_busy;     /* an ATT write-with-response is in flight */
-
-static int mb_ble_on_packet_write(uint16_t conn_handle, const struct ble_gatt_error *error,
-                                  struct ble_gatt_attr *attr, void *arg);
-
-static void mb_ble_pump(void)
-{
-    if (s_tx_busy || s_tx_next >= s_tx_len) {
-        return;
-    }
-
-    s_tx_busy = true;
-    const int rc = ble_gattc_write_flat(s_conn_handle, s_chr_val_handle, s_tx[s_tx_next],
-                                        MB_FLASH_PACKET_BYTES, mb_ble_on_packet_write, NULL);
-    if (rc != 0) {
-        s_tx_busy = false;
-        ESP_LOGE(TAG, "packet %u failed to start: rc=%d", s_tx_next, rc);
-        ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
-        return;
-    }
-    s_tx_next++;
-}
+static QueueHandle_t s_txq;
+static SemaphoreHandle_t s_tx_done;
+static bool s_connected;
 
 static int mb_ble_on_packet_write(uint16_t conn_handle, const struct ble_gatt_error *error,
                                   struct ble_gatt_attr *attr, void *arg)
 {
+    (void)conn_handle;
     (void)attr;
     (void)arg;
 
-    s_tx_busy = false;
     if (error->status != 0) {
         ESP_LOGE(TAG, "packet write rejected: status=%d", error->status);
-        ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
-        return 0;
     }
-    mb_ble_pump();
+    xSemaphoreGive(s_tx_done);
     return 0;
 }
 
-static void mb_ble_send_queued(uint8_t count)
+static void mb_ble_tx_task(void *arg)
 {
-    s_tx_len = count;
-    s_tx_next = 0;
-    mb_ble_pump();
+    (void)arg;
+    mb_tx_batch_t batch;
+
+    for (;;) {
+        if (xQueueReceive(s_txq, &batch, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        for (uint8_t i = 0; i < batch.count; i++) {
+            if (!s_connected) {
+                break;
+            }
+            (void)xSemaphoreTake(s_tx_done, 0);
+            const int rc = ble_gattc_write_flat(s_conn_handle, s_chr_val_handle, batch.data[i],
+                                                MB_FLASH_PACKET_BYTES, mb_ble_on_packet_write, NULL);
+            if (rc != 0) {
+                ESP_LOGE(TAG, "packet %u failed to start: rc=%d", i, rc);
+                break;
+            }
+            if (xSemaphoreTake(s_tx_done, pdMS_TO_TICKS(2000)) != pdTRUE) {
+                ESP_LOGE(TAG, "packet %u got no response in 2 s", i);
+                break;
+            }
+        }
+    }
+}
+
+static void mb_ble_enqueue(uint8_t count)
+{
+    mb_tx_batch_t batch;
+    batch.count = count;
+    memcpy(batch.data, s_tx, (size_t)count * MB_FLASH_PACKET_BYTES);
+    if (xQueueSend(s_txq, &batch, pdMS_TO_TICKS(2000)) != pdTRUE) {
+        ESP_LOGE(TAG, "tx queue full: dropped %u packets", count);
+    }
 }
 
 static void mb_ble_send_region_info(uint8_t region)
 {
     mb_flash_build_region_info(s_tx[0], region);
-    mb_ble_send_queued(1);
+    mb_ble_enqueue(1);
 }
 
 static void mb_ble_send_end_of_tx(void)
@@ -146,7 +162,7 @@ static void mb_ble_send_end_of_tx(void)
     const uint32_t last = MB_FIXTURE_REGION2_START +
                           (MB_FIXTURE_BLOCK_COUNT - 1u) * MB_FLASH_BLOCK_BYTES;
     mb_flash_build_end_of_tx(s_tx[0], last);
-    mb_ble_send_queued(1);
+    mb_ble_enqueue(1);
 }
 
 static void mb_ble_send_block(uint32_t index)
@@ -178,7 +194,7 @@ static void mb_ble_send_block(uint32_t index)
         }
     }
 
-    mb_ble_send_queued(MB_FLASH_PACKETS_PER_BLOCK);
+    mb_ble_enqueue(MB_FLASH_PACKETS_PER_BLOCK);
     s_packet += MB_FLASH_PACKETS_PER_BLOCK;
 }
 
@@ -494,13 +510,11 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
         s_svc_end_handle = 0;
         s_cccd_pending = false;
         s_conn_handle = event->connect.conn_handle;
+        s_connected = true;
         s_phase = MB_PHASE_IDLE;
         s_block = 0;
         s_packet = 0;
         s_resyncs = 0;
-        s_tx_busy = false;
-        s_tx_len = 0;
-        s_tx_next = 0;
         if (ble_gattc_disc_svc_by_uuid(event->connect.conn_handle, &k_partial_flash_svc.u,
                                        mb_ble_on_svc_disc, NULL) != 0) {
             ESP_LOGE(TAG, "service discovery failed to start");
@@ -513,8 +527,11 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
         return 0;
 
     case BLE_GAP_EVENT_DISCONNECT:
+        s_connected = false;
         ESP_LOGW(TAG, "disconnected: reason=%d", event->disconnect.reason);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        /* No delay here: this callback runs on the NimBLE host task, and
+         * sleeping in it stops HCI processing for the whole stack. Scanning
+         * again immediately is enough of a back-off. */
         mb_ble_scan();
         return 0;
 
@@ -618,6 +635,17 @@ esp_err_t mb_ble_central_start(void)
      */
     ESP_LOGI(TAG, "probe build %s %s, reset_reason=%d",
              __DATE__, __TIME__, (int)esp_reset_reason());
+
+    s_txq = xQueueCreate(8, sizeof(mb_tx_batch_t));
+    s_tx_done = xSemaphoreCreateBinary();
+    if (s_txq == NULL || s_tx_done == NULL) {
+        ESP_LOGE(TAG, "could not allocate the tx queue");
+        return ESP_ERR_NO_MEM;
+    }
+    if (xTaskCreate(mb_ble_tx_task, "mb_ble_tx", 4096, NULL, 4, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "could not start the tx task");
+        return ESP_ERR_NO_MEM;
+    }
 
     /* The host needs its own stack; the caller's task is the GSP/UI owner and
      * must stay free to service the panel. */
