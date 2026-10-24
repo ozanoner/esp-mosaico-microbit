@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from esp_mb_brain.builder import BuildError, build
-from esp_mb_brain.config import Settings
+from mb_build_service.builder import BuildError, build
+from mb_build_service.config import Settings
 
 TEMPLATE_HASH = bytes.fromhex("0662709FA0315567")
 PROGRAM_HASH = bytes.fromhex("EDE9690A1093AE71")

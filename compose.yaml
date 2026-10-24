@@ -1,8 +1,8 @@
 # One compose file for both halves of the system.
 #
-#   docker compose up -d brain            # build box (PoC path, needs nothing else)
+#   docker compose up -d build-service            # build box (PoC path, needs nothing else)
 #   docker compose up -d esp-idf          # ESP-IDF toolchain for firmware work
-#   docker compose run --rm brain verify  # reproducibility check
+#   docker compose run --rm build-service verify  # reproducibility check
 #
 # Only Docker is required on the host.
 # No fixed project `name`: compose derives it from the checkout directory, so two
@@ -10,11 +10,11 @@
 # same containers and volumes.
 
 services:
-  brain:
+  build-service:
     build:
       context: .
-      dockerfile: brain/Dockerfile
-    image: esp-mosaico-microbit/brain:local
+      dockerfile: build-service/Dockerfile
+    image: esp-mosaico-microbit/build-service:local
     working_dir: /workspace
     volumes:
       - .:/workspace

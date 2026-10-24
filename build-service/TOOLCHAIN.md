@@ -49,8 +49,8 @@ make verify      # tests + rebuild + golden-hash comparison, inside the containe
 Manual equivalent, if you want the parts:
 
 ```sh
-docker compose run --rm brain build microbit/payloads/hello.ts -o build/hello.hex
-docker compose run --rm brain inspect build/hello.hex
+docker compose run --rm build-service build microbit/payloads/hello.ts -o build/hello.hex
+docker compose run --rm build-service inspect build/hello.hex
 ```
 
 If either hash differs from the table above without a deliberate `mkc` upgrade,

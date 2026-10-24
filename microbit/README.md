@@ -4,7 +4,7 @@ No firmware development happens here. The partial-flash service ships inside the
 DAL and is enabled for MakeCode programs ("partial flashing is only supported by
 programs built using MakeCode" — micro:bit partial-flash docs), so all we own is:
 
-- `template/` — the pinned MakeCode project the brain service compiles. Only
+- `template/` — the pinned MakeCode project the build service compiles. Only
   `main.ts` varies between builds; `pxt.json` is fixed so the DAL — and therefore
   the template hash compared during flashing — never moves.
 - `payloads/` — example programs, used by the PoC and by tests.

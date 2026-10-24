@@ -1,4 +1,4 @@
-# Brain service
+# Build service
 
 Turns MakeCode source into a micro:bit v1 `.hex` plus the two region hashes the
 flasher needs. PoC scope: `/v1/health` and `/v1/build`. Speech and LLM endpoints
@@ -7,11 +7,11 @@ arrive once a generated image is proven to boot (gate G4).
 Runs as a container; the host needs nothing installed.
 
 ```sh
-docker compose run --rm brain verify                    # reproducibility check
-docker compose run --rm brain build microbit/payloads/hello.ts -o build/hello.hex
-docker compose run --rm brain inspect build/hello.hex
-docker compose up -d brain                              # http://localhost:8080
-docker compose run --rm brain shell                     # poke around
+docker compose run --rm build-service verify                    # reproducibility check
+docker compose run --rm build-service build microbit/payloads/hello.ts -o build/hello.hex
+docker compose run --rm build-service inspect build/hello.hex
+docker compose up -d build-service                              # http://localhost:8080
+docker compose run --rm build-service shell                     # poke around
 ```
 
 ## Image contents (all pinned)

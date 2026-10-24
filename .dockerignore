@@ -1,8 +1,8 @@
 .git
 .venv
 build
-brain/.work
-brain/.toolchain
+build-service/.work
+build service/.toolchain
 **/__pycache__
 **/*.pyc
 firmware/build

@@ -3,20 +3,20 @@
 # (offline: the wheels are in the image's uv cache) and then dispatches.
 set -euo pipefail
 
-cd /workspace/brain
+cd /workspace/build-service
 uv sync --frozen --extra dev --offline --quiet
 export PATH="/opt/venv/bin:${PATH}"
 
 case "${1:-serve}" in
     serve)
-        exec python -m esp_mb_brain.app
+        exec python -m mb_build_service.app
         ;;
     verify)
         exec bash /workspace/scripts/verify.sh
         ;;
     build)
         shift
-        exec python -m esp_mb_brain.builder "$@"
+        exec python -m mb_build_service.builder "$@"
         ;;
     inspect)
         shift
@@ -24,7 +24,7 @@ case "${1:-serve}" in
         ;;
     test)
         shift
-        exec python -m pytest /workspace/tools/hexkit/tests /workspace/brain/tests "$@"
+        exec python -m pytest /workspace/tools/hexkit/tests /workspace/build-service/tests "$@"
         ;;
     shell)
         exec bash

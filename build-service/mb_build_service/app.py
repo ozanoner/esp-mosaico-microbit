@@ -1,4 +1,4 @@
-"""HTTP surface of the brain service (PoC scope: build + health).
+"""HTTP surface of the build service (PoC scope: build + health).
 
 Speech and LLM endpoints are deliberately absent: the PoC validates the chain
 that carries the risk (compile -> hashes -> BLE flash). Voice arrives once a
@@ -16,7 +16,7 @@ import hexkit
 from .builder import BuildError, build
 from .config import settings
 
-app = FastAPI(title="esp-mosaico-microbit brain", version="0.1.0")
+app = FastAPI(title="esp-mosaico-microbit build service", version="0.1.0")
 
 
 class BuildRequest(BaseModel):

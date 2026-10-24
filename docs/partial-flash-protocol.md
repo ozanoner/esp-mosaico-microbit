@@ -60,7 +60,7 @@ documents:
 ⚠️ **Region 2's real start moves.** In an image built by `mkc` 1.3.6 the DAL ends
 at **`0x37400`**, and the magic sits there — not at `0x30000`. Region 1's end is
 `FLASH_PROGRAM_END` from the DAL build, so the client must take the magic address
-from the new image and never hardcode it. Measured values: `brain/TOOLCHAIN.md`.
+from the new image and never hardcode it. Measured values: `build-service/TOOLCHAIN.md`.
 
 `MicroBitMemoryMap::findHashes()` scans pages from `0x30000` for the 16-byte magic
 `708E3B92C615A841C49866C975EE5197`, then:

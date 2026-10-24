@@ -14,5 +14,5 @@ docker compose version >/dev/null 2>&1 || {
     exit 1
 }
 
-echo "building the brain image and running the reproducibility check…"
-exec docker compose run --rm brain verify
+echo "building the build service image and running the reproducibility check…"
+exec docker compose run --rm build-service verify

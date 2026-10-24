@@ -125,7 +125,7 @@ def build(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="python -m esp_mb_brain.builder",
+        prog="python -m mb_build_service.builder",
         description="Build a MakeCode source file into a micro:bit v1 hex",
     )
     parser.add_argument("source", type=Path, help="TypeScript source (main.ts)")

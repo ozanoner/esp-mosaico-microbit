@@ -26,5 +26,5 @@ Notes
   accepts either — see firmware/README.md before assuming upstream build parity.
 * Flashing and serial capture happen on cirunner. This container has no USB
   device mappings by design.
-* The build box (`brain`) is a separate service: `docker compose up -d brain`.
+* The build box (`build service`) is a separate service: `docker compose up -d build-service`.
 EOF

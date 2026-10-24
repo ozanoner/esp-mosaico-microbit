@@ -62,7 +62,7 @@ Components to add on top of the template:
 |---|---|
 | `mb_payload` | Intel HEX → region-2 64-byte blocks (C port of `tools/hexkit`) |
 | `mb_flash` | NimBLE central + partial-flash client |
-| `brain_client` | HTTPS to the brain service, TLS buffers in PSRAM |
+| `build_service_client` | HTTPS to the build service, TLS buffers in PSRAM |
 | `app_studio` | state machine + GSP scene |
 
 `project init` initialises an independent git repository inside

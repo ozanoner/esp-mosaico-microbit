@@ -32,14 +32,14 @@ git clone --recurse-submodules https://github.com/ozanoner/esp-mosaico-microbit
 cd esp-mosaico-microbit
 
 make verify        # tests + rebuild the PoC payload + compare against golden hashes
-make up            # brain service on http://localhost:8080/v1/health
+make up            # build service on http://localhost:8080/v1/health
 make build         # build microbit/payloads/hello.ts -> build/hello.hex
 make firmware      # shell with ESP-IDF + mosaico.py (firmware work)
 make test          # unit tests only
 make down          # stop everything
 ```
 
-First `make verify` builds the brain image (node base + `npm ci` + `uv sync` +
+First `make verify` builds the build service image (node base + `npm ci` + `uv sync` +
 a warm-up MakeCode compile) — a few minutes and a few hundred MB, once. After
 that the container builds payloads with **no network access**.
 
@@ -51,7 +51,7 @@ template hash, program hash, region-2 range or region-2 bytes differ from
 
 | Path | What it is | Runs on |
 |---|---|---|
-| `brain/` | HTTP service: MakeCode source in, `.hex` + region hashes out | container (`brain/Dockerfile`) |
+| `build-service/` | HTTP service: MakeCode source in, `.hex` + region hashes out | container (`build-service/Dockerfile`) |
 | `firmware/` | ESP-Mosaico application (NimBLE central + partial-flash client + UI) | ESP32-S31 in the `esp-idf` container |
 | `microbit/` | Pinned MakeCode template, PoC payloads, golden hashes | build input |
 | `tools/hexkit/` | Intel HEX parsing, DAL magic/hash extraction, region-2 block packing | anywhere (reference for the C port) |

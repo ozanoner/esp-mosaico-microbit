@@ -6,7 +6,7 @@
 #   3. compare hash + geometry with microbit/golden/expected.json
 set -euo pipefail
 
-# Works inside the brain container (/workspace) and on a checkout with a local venv.
+# Works inside the build service container (/workspace) and on a checkout with a local venv.
 ROOT="${MB_ROOT:-/workspace}"
 if [ ! -d "$ROOT" ]; then
     ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,13 +23,13 @@ echo "toolchain id: ${MB_TOOLCHAIN_ID:-unset}"
 
 echo
 echo "== unit tests =="
-python -m pytest tools/hexkit/tests brain/tests -q
+python -m pytest tools/hexkit/tests build-service/tests -q
 
 echo
 echo "== rebuild payload =="
 rm -f build/hello.hex
 MB_TOOLCHAIN_ID="${MB_TOOLCHAIN_ID:-mkc-1.3.6}" \
-    python -m esp_mb_brain.builder microbit/payloads/hello.ts -o build/hello.hex
+    python -m mb_build_service.builder microbit/payloads/hello.ts -o build/hello.hex
 
 echo
 echo "== compare against golden =="

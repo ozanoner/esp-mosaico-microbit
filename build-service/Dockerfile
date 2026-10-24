@@ -28,7 +28,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.29 /uv /usr/local/bin/uv
 
 # --- MakeCode compiler, exact version -------------------------------------
 WORKDIR /opt/mkc
-COPY brain/package.json brain/package-lock.json ./
+COPY build-service/package.json build-service/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts \
  && npm ls --depth=0 \
  && mkc --version
@@ -37,9 +37,9 @@ RUN npm ci --omit=dev --ignore-scripts \
 # The project sources are mounted at runtime, so only the third-party
 # dependencies are resolved here; the entrypoint syncs the mounted project
 # against the same lock, offline, using this cache.
-WORKDIR /opt/brain
+WORKDIR /opt/build-service
 COPY tools/hexkit /opt/tools/hexkit
-COPY brain/pyproject.toml brain/uv.lock ./
+COPY build-service/pyproject.toml build-service/uv.lock ./
 RUN uv sync --frozen --extra dev --no-install-project
 
 # --- warm the MakeCode editor cache so runtime builds stay offline --------
@@ -56,7 +56,7 @@ RUN mkdir -p /tmp/warm-project \
  && du -sh /root/.pxt
 
 WORKDIR /workspace
-COPY brain/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY build-service/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["serve"]

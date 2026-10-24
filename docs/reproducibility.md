@@ -6,10 +6,10 @@ Goal: `git clone` → `make verify` → same bytes, on any machine with Docker.
 
 | Thing | Pinned by | File |
 |---|---|---|
-| MakeCode compiler (`mkc`) | exact npm version `1.3.6`, lockfile, `npm ci` | `brain/package.json`, `brain/package-lock.json` |
-| MakeCode editor worker | baked into the image at build time (`/root/.pxt`) | `brain/Dockerfile` |
-| Python dependencies | frozen lock, `uv sync --frozen` | `brain/uv.lock` |
-| Node base image | digest | `brain/Dockerfile` |
+| MakeCode compiler (`mkc`) | exact npm version `1.3.6`, lockfile, `npm ci` | `build-service/package.json`, `build-service/package-lock.json` |
+| MakeCode editor worker | baked into the image at build time (`/root/.pxt`) | `build-service/Dockerfile` |
+| Python dependencies | frozen lock, `uv sync --frozen` | `build-service/uv.lock` |
+| Node base image | digest | `build-service/Dockerfile` |
 | ESP-IDF toolchain | image digest | `compose.yaml` |
 | esp-mosaico tooling + BSP | git submodule commits | `.gitmodules` (gitlinks in `main`) |
 | Expected build output | golden hashes | `microbit/golden/expected.json` |
@@ -44,9 +44,9 @@ make clean
 
 ## Refreshing the pin (deliberate upgrade)
 
-1. Change the version in `brain/package.json`, run `npm install --package-lock-only`.
+1. Change the version in `build-service/package.json`, run `npm install --package-lock-only`.
 2. `make verify` — it will fail and print the new hashes.
-3. Update `microbit/golden/expected.json` **and** `brain/TOOLCHAIN.md` in the same
+3. Update `microbit/golden/expected.json` **and** `build-service/TOOLCHAIN.md` in the same
    commit, and say in the message that the toolchain moved.
 4. Re-bootstrap the micro:bit over USB: a new DAL means partial flashing will
    (correctly) refuse the old device state.

@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "esp-mb-brain"
+name = "esp-mb-build-service"
 version = "0.1.0"
 description = "Build service: MakeCode source -> micro:bit v1 hex with region hashes"
 requires-python = ">=3.10"
@@ -19,10 +19,10 @@ dependencies = [
 dev = ["pytest>=8", "httpx>=0.27"]
 
 [project.scripts]
-mb-brain = "esp_mb_brain.app:run"
+mb-build-service = "mb_build_service.app:run"
 
 [tool.setuptools]
-packages = ["esp_mb_brain"]
+packages = ["mb_build_service"]
 
 [tool.uv.sources]
 hexkit = { path = "../tools/hexkit", editable = true }
