@@ -6,7 +6,7 @@
 
 The device never parses a 1.3 MB hex: it only streams region 2, because the
 SoftDevice and DAL are already on the micro:bit. So the payload that mb_flash
-streams is committed as a fixture — `components/mb_flash/fixture/mb_fixture.bin`
+streams is committed as a fixture — `components/mb_flash/mb_fixture.bin`
 plus a generated header with the geometry and hashes — and this script is how it
 is (re)produced.
 
@@ -27,9 +27,9 @@ sys.path.insert(0, str(REPO / "tools" / "hexkit"))
 
 import hexkit  # noqa: E402  (path set above)
 
-FIXTURE_DIR = REPO / "firmware" / "projects" / "microbit_studio" / "components" / "mb_flash" / "fixture"
-BIN_NAME = "mb_fixture.bin"
-HEADER_NAME = "mb_fixture.h"
+FIXTURE_DIR = REPO / "firmware" / "projects" / "microbit_studio" / "components" / "mb_flash"
+BIN_PATH = FIXTURE_DIR / "mb_fixture.bin"
+HEADER_PATH = FIXTURE_DIR / "include" / "mb_fixture.h"
 
 
 def build(hex_path: Path) -> tuple[bytes, bytes, str]:
@@ -78,19 +78,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     region, header, sha = build(args.hex)
-    bin_path = FIXTURE_DIR / BIN_NAME
-    header_path = FIXTURE_DIR / HEADER_NAME
+    bin_path = BIN_PATH
+    header_path = HEADER_PATH
 
     if args.check:
         problems = []
         if not bin_path.is_file():
             problems.append(f"missing {bin_path.relative_to(REPO)}")
         elif bin_path.read_bytes() != region:
-            problems.append(f"{BIN_NAME} differs from {args.hex.name}")
+            problems.append(f"{BIN_PATH.name} differs from {args.hex.name}")
         if not header_path.is_file():
             problems.append(f"missing {header_path.relative_to(REPO)}")
         elif header_path.read_bytes() != header:
-            problems.append(f"{HEADER_NAME} differs from {args.hex.name}")
+            problems.append(f"{HEADER_PATH.name} differs from {args.hex.name}")
         for problem in problems:
             print(f"extract_region2: {problem}")
         if problems:

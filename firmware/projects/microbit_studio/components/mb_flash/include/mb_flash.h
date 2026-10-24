@@ -30,6 +30,8 @@ extern "C" {
 #define MB_FLASH_PACKET_BYTES 20u
 /** Packets per WRITE_DATA block; the device writes 64 B per block. */
 #define MB_FLASH_PACKETS_PER_BLOCK 4u
+/** Bytes per WRITE_DATA block: 4 packets x 16 data bytes. */
+#define MB_FLASH_BLOCK_BYTES 64u
 /** REGION_INFO notification: opcode + region + start(4) + end(4) + hash(8). */
 #define MB_FLASH_REGION_NOTIFY_BYTES 18u
 
@@ -95,6 +97,10 @@ void mb_flash_build_end_of_tx(uint8_t out[MB_FLASH_PACKET_BYTES], uint32_t offse
  */
 mb_flash_notify_kind_t mb_flash_parse_notify(const uint8_t *data, size_t length,
                                              mb_flash_notify_t *out);
+
+/** The embedded region-2 image, and its length in bytes. */
+const uint8_t *mb_flash_fixture_data(void);
+uint32_t mb_flash_fixture_len(void);
 
 #ifdef __cplusplus
 }
