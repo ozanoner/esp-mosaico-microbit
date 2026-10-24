@@ -29,6 +29,10 @@ typedef void (*mb_build_image_fn)(const mb_flash_image_t *image);
 
 esp_err_t mb_build_client_start(mb_event_fn status, mb_build_image_fn on_image);
 
+/* Fetch the program and hand it to `on_image`. Called when a spoken request
+ * has produced an image; nothing is fetched at boot. */
+esp_err_t mb_build_client_request(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -41,6 +41,7 @@ static size_t s_pcm_len;
 static volatile bool s_recording;
 static SemaphoreHandle_t s_pressed;
 static mb_event_fn s_event;
+static mb_voice_done_fn s_done;
 static esp_codec_dev_handle_t s_mic;
 
 static void put_le32(uint8_t *p, uint32_t v)
@@ -124,6 +125,13 @@ static void log_reply(int status, const reply_t *reply)
 
 static void post_wav(const uint8_t *wav, size_t len)
 {
+    /* From here the service is doing ASR, LLM and the compile, which is what the
+     * panel's BUILDING screen describes. Nothing is reported before this point. */
+    if (s_event != NULL) {
+        const mb_event_t building = {.kind = MB_EVENT_BUILD_STARTED};
+        s_event(&building);
+    }
+
     char url[192];
     snprintf(url, sizeof(url), "%s?include_hex=false", CONFIG_MB_VOICE_SERVICE_URL);
 
@@ -172,6 +180,9 @@ static void post_wav(const uint8_t *wav, size_t len)
         }
     } else {
         log_reply(esp_http_client_get_status_code(client), &reply);
+        if (esp_http_client_get_status_code(client) == 200 && s_done != NULL) {
+            s_done();
+        }
     }
 
     esp_http_client_cleanup(client);
@@ -374,7 +385,7 @@ static void wifi_task(void *arg)
     vTaskDelete(NULL);
 }
 
-esp_err_t mb_voice_start(mb_event_fn status)
+esp_err_t mb_voice_start(mb_event_fn status, mb_voice_done_fn on_captured)
 {
     if (s_wav != NULL) {
         return ESP_ERR_INVALID_STATE;
@@ -426,6 +437,7 @@ esp_err_t mb_voice_start(mb_event_fn status)
         ESP_LOGW(TAG, "could not start the WiFi task");
     }
 
+    s_done = on_captured;
     s_pressed = xSemaphoreCreateBinary();
     if (s_pressed == NULL) {
         return ESP_ERR_NO_MEM;

@@ -48,6 +48,8 @@ static mb_flash_image_t s_image;
 static mb_event_fn s_event;
 static mb_build_image_fn s_on_image;
 static uint8_t *s_bytes; /* PSRAM; kept for the life of the boot */
+static bool s_running;
+static bool s_started;
 
 static void report(mb_event_kind_t kind, const char *detail)
 {
@@ -288,17 +290,17 @@ static void build_task(void *arg)
 {
     (void)arg;
 
-    /* The panel says "building" from the moment the fetch starts: a 40 s
-     * compile with a blank screen is indistinguishable from a hung app. */
-    report(MB_EVENT_BUILD_STARTED, NULL);
-
+    /* The panel already says BUILDING: voice reports it when the request goes
+     * out, which is where the ASR, LLM and compile actually happen. */
     if (wait_for_ip() != ESP_OK) {
         report(MB_EVENT_FAILED, "the build box is not answering");
+        s_running = false;
         vTaskDelete(NULL);
         return;
     }
     if (fetch(&s_image) != ESP_OK) {
         report(MB_EVENT_FAILED, "the build box is not answering");
+        s_running = false;
         vTaskDelete(NULL);
         return;
     }
@@ -317,20 +319,31 @@ static void build_task(void *arg)
     if (s_on_image != NULL) {
         s_on_image(&s_image);
     }
+    s_running = false;
     vTaskDelete(NULL);
 }
 
 esp_err_t mb_build_client_start(mb_event_fn status, mb_build_image_fn on_image)
 {
-    if (s_bytes != NULL) {
+    if (s_started) {
         return ESP_ERR_INVALID_STATE;
     }
+    s_started = true;
     s_event = status;
     s_on_image = on_image;
 
-    ESP_LOGI(TAG, "fetching one image from %s", CONFIG_MB_BUILD_SERVICE_URL);
+    ESP_LOGI(TAG, "build client ready, service %s", CONFIG_MB_BUILD_SERVICE_URL);
+    return ESP_OK;
+}
+
+esp_err_t mb_build_client_request(void)
+{
+    if (s_running) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_running = true;
     if (xTaskCreate(build_task, "mb_build", 8192, NULL, 4, NULL) != pdPASS) {
-        ESP_LOGE(TAG, "could not start the fetch task");
+        s_running = false;
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;

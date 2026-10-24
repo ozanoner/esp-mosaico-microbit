@@ -16,7 +16,11 @@ extern "C" {
  *
  * Failure is non-fatal by design: the UI and Recovery keep running without it.
  */
-esp_err_t mb_voice_start(mb_event_fn status);
+/* Called once a spoken request has produced a program, so the caller can
+ * fetch the image. Runs on the recording task. */
+typedef void (*mb_voice_done_fn)(void);
+
+esp_err_t mb_voice_start(mb_event_fn status, mb_voice_done_fn on_captured);
 
 #ifdef __cplusplus
 }

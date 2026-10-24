@@ -35,6 +35,18 @@ static void on_pipeline_event(const mb_event_t *event)
     }
 }
 
+/* The spoken request came back with a program; fetch it and start the flash. */
+static void on_captured(void)
+{
+    const esp_err_t err = mb_build_client_request();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "could not start the fetch (%s)", esp_err_to_name(err));
+        const mb_event_t failure = {.kind = MB_EVENT_FAILED,
+                                    .detail = "the build box is not answering"};
+        on_pipeline_event(&failure);
+    }
+}
+
 /* Called on the fetch task once the image is in PSRAM; the bytes stay valid for
  * the rest of the boot, which is what the flash driver borrows. */
 static void on_image(const mb_flash_image_t *image)
@@ -86,7 +98,7 @@ void app_main(void)
      * down. */
     mb_mem_probe_start();
     mb_mem_probe_stage("ui-ready");
-    const esp_err_t voice_err = mb_voice_start(on_pipeline_event);
+    const esp_err_t voice_err = mb_voice_start(on_pipeline_event, on_captured);
     if (voice_err != ESP_OK) {
         ESP_LOGE(TAG, "push-to-talk unavailable (%s)", esp_err_to_name(voice_err));
     }
