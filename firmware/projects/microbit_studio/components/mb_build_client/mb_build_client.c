@@ -45,14 +45,16 @@ typedef struct {
 } reply_t;
 
 static mb_flash_image_t s_image;
-static mb_flash_status_fn s_status;
+static mb_event_fn s_event;
 static mb_build_image_fn s_on_image;
 static uint8_t *s_bytes; /* PSRAM; kept for the life of the boot */
 
-static void report(const char *text)
+static void report(mb_event_kind_t kind, const char *detail)
 {
-    if (s_status != NULL) {
-        s_status(text);
+    if (s_event != NULL) {
+        const mb_event_t event = {.kind = kind, .detail = detail,
+                                  .progress_done = 0, .progress_total = 0};
+        s_event(&event);
     }
 }
 
@@ -288,15 +290,15 @@ static void build_task(void *arg)
 
     /* The panel says "building" from the moment the fetch starts: a 40 s
      * compile with a blank screen is indistinguishable from a hung app. */
-    report("b");
+    report(MB_EVENT_BUILD_STARTED, NULL);
 
     if (wait_for_ip() != ESP_OK) {
-        report("E1");
+        report(MB_EVENT_FAILED, "the build box is not answering");
         vTaskDelete(NULL);
         return;
     }
     if (fetch(&s_image) != ESP_OK) {
-        report("E1");
+        report(MB_EVENT_FAILED, "the build box is not answering");
         vTaskDelete(NULL);
         return;
     }
@@ -311,18 +313,19 @@ static void build_task(void *arg)
              s_image.program_hash[4], s_image.program_hash[5], s_image.program_hash[6],
              s_image.program_hash[7]);
 
+    report(MB_EVENT_IMAGE_READY, NULL);
     if (s_on_image != NULL) {
         s_on_image(&s_image);
     }
     vTaskDelete(NULL);
 }
 
-esp_err_t mb_build_client_start(mb_flash_status_fn status, mb_build_image_fn on_image)
+esp_err_t mb_build_client_start(mb_event_fn status, mb_build_image_fn on_image)
 {
     if (s_bytes != NULL) {
         return ESP_ERR_INVALID_STATE;
     }
-    s_status = status;
+    s_event = status;
     s_on_image = on_image;
 
     ESP_LOGI(TAG, "fetching one image from %s", CONFIG_MB_BUILD_SERVICE_URL);

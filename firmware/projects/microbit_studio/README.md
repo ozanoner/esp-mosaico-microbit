@@ -17,12 +17,21 @@ only for code changes with an identical full partition table and resources.
 
 Application components:
 
-- `components/app_hello`: portable UI behavior and private controller state.
+- `components/app_studio`: eight-state controller and the studio scene. Two
+  columns: messages on the left, the bear on the right; five-segment flash
+  progress; trophy clip on DONE. Its README carries the state table.
+- `components/mb_event`: header-only `mb_event_t` contract that `mb_voice`,
+  `mb_build_client` and `mb_ble_central` report through, so no pipeline
+  component depends on the UI.
 - `components/app_display`: BSP-to-GSP display and optional touch policy.
 - `main`: device startup and dependency composition only.
-- `components/app_hello/host`: desktop adapter and its separate CMake build,
+- `components/app_studio/host`: desktop adapter and its separate CMake build,
   reusing the same controller and public header; excluded from the ESP32 build.
-- `components/app_hello/ui/main.json`: authored scene; generated bindings and bundles stay in the build.
+  `STUDIO_SIM_STATE=<IDLE|LISTENING|BUILDING|AWAIT_MICROBIT|FLASHING|VERIFYING|DONE|FAILED>`
+  renders one exact screen headlessly.
+- `components/app_studio/ui/main.json`: authored scene; generated bindings and
+  bundles stay in the build. `tmp/build_scene.py` regenerates it from the hello
+  chrome in git, with explicit parent remapping.
 
 `project sim` discovers a unique scene under `components/*/ui/main.json` (or the
 older root `ui/main.json`). With multiple scenes, select one using `--scene PATH`,

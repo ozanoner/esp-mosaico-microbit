@@ -2,6 +2,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include "mb_event.h"
 #include "mb_flash.h"
 
 #ifdef __cplusplus
@@ -18,7 +19,7 @@ extern "C" {
  *
  * The work runs on its own task because the compile takes tens of seconds and
  * the panel must not wait: `status` gets a short token while it happens ("b",
- * "E1"), and `on_image` is called once, on that task, with a borrowed pointer
+ * a build-started event), and `on_image` is called once, on that task, with a borrowed pointer
  * that stays valid until reboot. Nothing calls it on failure; the reason is on
  * the UART log and on `status`.
  *
@@ -26,7 +27,7 @@ extern "C" {
  */
 typedef void (*mb_build_image_fn)(const mb_flash_image_t *image);
 
-esp_err_t mb_build_client_start(mb_flash_status_fn status, mb_build_image_fn on_image);
+esp_err_t mb_build_client_start(mb_event_fn status, mb_build_image_fn on_image);
 
 #ifdef __cplusplus
 }

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include "mb_event.h"
 #include "mb_flash.h"
 
 #ifdef __cplusplus
@@ -25,7 +26,8 @@ extern "C" {
  *
  * `image` is borrowed: the caller owns it and it must outlive every transfer
  * (the build client keeps it in PSRAM for the lifetime of the boot).
- * `status` receives a short screen token ("F", "OK", "E2"); NULL is allowed.
+ * `status` receives typed pipeline events (scanning, block progress, verifying,
+ * done, and failures carrying a kid-facing sentence); NULL is allowed.
  *
  * Returns ESP_OK once the task exists. Every connection outcome — found,
  * connected, subscribed, hashes, blocks, errors — arrives on the UART log and
@@ -34,7 +36,7 @@ extern "C" {
  *
  * Idempotent: a second call returns ESP_ERR_INVALID_STATE.
  */
-esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_flash_status_fn status);
+esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_event_fn status);
 
 #ifdef __cplusplus
 }

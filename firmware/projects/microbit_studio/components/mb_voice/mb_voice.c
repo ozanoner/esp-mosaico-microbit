@@ -40,6 +40,7 @@ static uint8_t *s_wav;          /* PSRAM: header + PCM, header written on stop *
 static size_t s_pcm_len;
 static volatile bool s_recording;
 static SemaphoreHandle_t s_pressed;
+static mb_event_fn s_event;
 static esp_codec_dev_handle_t s_mic;
 
 static void put_le32(uint8_t *p, uint32_t v)
@@ -164,6 +165,11 @@ static void post_wav(const uint8_t *wav, size_t len)
     const esp_err_t err = esp_http_client_perform(client);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "POST failed: %s", esp_err_to_name(err));
+        if (s_event != NULL) {
+            const mb_event_t failure = {.kind = MB_EVENT_FAILED,
+                                        .detail = "I could not hear that"};
+            s_event(&failure);
+        }
     } else {
         log_reply(esp_http_client_get_status_code(client), &reply);
     }
@@ -179,9 +185,17 @@ static void on_ai_button(void *button, void *user_data)
     const button_event_t event = iot_button_get_event((button_handle_t)button);
     if (event == BUTTON_PRESS_DOWN) {
         s_recording = true;
+        if (s_event != NULL) {
+            const mb_event_t started = {.kind = MB_EVENT_LISTENING_STARTED};
+            s_event(&started);
+        }
         xSemaphoreGive(s_pressed);
     } else if (event == BUTTON_PRESS_UP) {
         s_recording = false;
+        if (s_event != NULL) {
+            const mb_event_t stopped = {.kind = MB_EVENT_LISTENING_STOPPED};
+            s_event(&stopped);
+        }
     }
 }
 
@@ -360,7 +374,7 @@ static void wifi_task(void *arg)
     vTaskDelete(NULL);
 }
 
-esp_err_t mb_voice_start(void)
+esp_err_t mb_voice_start(mb_event_fn status)
 {
     if (s_wav != NULL) {
         return ESP_ERR_INVALID_STATE;

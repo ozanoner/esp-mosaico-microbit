@@ -3,3 +3,9 @@
 # CONFIG_ESP_IRIS_OTA is not set
 CONFIG_ESP_IRIS_USB_PRODUCT="ESP-Iris Mosaico microbit_studio"
 CONFIG_ESP_IRIS_HEALTH_TIMEOUT_MS=45000
+
+# GSP image cache. The studio scene keeps three rasters live (micro:bit footer,
+# bear, trophy) and the trophy animation peaks at 165.9 KiB of decoded frames
+# (gspc report for this scene), so the automatic budget must be able to grow
+# past the 64 KiB default floor without relying on late eviction.
+CONFIG_ESP_GSP_IMAGE_CACHE_AUTO_MIN_BYTES=262144

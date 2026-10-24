@@ -94,22 +94,29 @@ static bool s_flash_done;   /* stop flashing, fall back to the STATUS probe */
  *        no  → FAILED, screen shows E3
  */
 static const mb_flash_image_t *s_image;
-static mb_flash_status_fn s_status;
+static mb_event_fn s_event;
 static uint32_t s_cycle;        /* cycles verified so far */
 static bool s_await_verify;     /* a transfer landed; this connection verifies it */
 static bool s_peer_seen;        /* a micro:bit answered at least once */
 
-static void mb_ble_status(const char *text)
+static void mb_ble_emit(mb_event_kind_t kind, const char *detail,
+                         uint16_t done, uint16_t total)
 {
-    if (s_status != NULL) {
-        s_status(text);
+    if (s_event != NULL) {
+        const mb_event_t event = {
+            .kind = kind,
+            .detail = detail,
+            .progress_done = done,
+            .progress_total = total,
+        };
+        s_event(&event);
     }
 }
 
-static void mb_ble_fail(const char *state, const char *why)
+static void mb_ble_fail(const char *code, const char *why, const char *kid)
 {
-    ESP_LOGE(TAG, "FAILED: %s", why);
-    mb_ble_status(state);
+    ESP_LOGE(TAG, "FAILED %s: %s", code, why);
+    mb_ble_emit(MB_EVENT_FAILED, kid, 0, 0);
     s_flash_done = true;
     ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
 }
@@ -175,7 +182,9 @@ static void mb_ble_watch_task(void *arg)
             esp_log_timestamp() > (uint32_t)CONFIG_MB_BLE_PEER_TIMEOUT_S * 1000u) {
             ESP_LOGE(TAG, "no micro:bit within %d s; check the board is advertising",
                      CONFIG_MB_BLE_PEER_TIMEOUT_S);
-            mb_ble_status("E4");
+            /* Not a failure: the panel keeps waiting and promotes the ritual
+             * prompt on its own timer, so the flow can continue the moment a
+             * board answers. */
             s_peer_seen = true; /* report once */
         }
     }
@@ -231,7 +240,8 @@ static void mb_ble_tx_task(void *arg)
                                                 MB_FLASH_PACKET_BYTES, mb_ble_on_packet_write, NULL);
             if (rc != 0) {
                 ESP_LOGE(TAG, "packet %u failed to start: rc=%d", i, rc);
-                mb_ble_fail("E3", "the radio refused a packet");
+                mb_ble_fail("E3", "the radio refused a packet",
+                    "the micro:bit stopped answering");
                 break;
             }
             if (xSemaphoreTake(s_tx_done, pdMS_TO_TICKS(CONFIG_MB_BLE_ACK_TIMEOUT_MS)) != pdTRUE) {
@@ -239,11 +249,13 @@ static void mb_ble_tx_task(void *arg)
                  * a cold board arrived 300 ms *after* a 2 s deadline, and a
                  * warm board answers each block in ~480 ms. 2 s was the bug,
                  * not the link. */
-                mb_ble_fail("E3", "packet ack timed out");
+                mb_ble_fail("E3", "packet ack timed out",
+                    "the micro:bit stopped answering");
                 break;
             }
             if (s_write_error != 0) {
-                mb_ble_fail("E3", "the peer rejected a packet");
+                mb_ble_fail("E3", "the peer rejected a packet",
+                    "the micro:bit stopped answering");
                 break;
             }
         }
@@ -278,7 +290,8 @@ static void mb_ble_send_block(uint32_t index)
 {
     const uint32_t offset = index * MB_FLASH_BLOCK_BYTES;
     if (offset + MB_FLASH_BLOCK_BYTES > s_image->len) {
-        mb_ble_fail("E3", "block index past the fetched image");
+        mb_ble_fail("E3", "block index past the fetched image",
+                    "the program did not arrive intact");
         return;
     }
 
@@ -325,7 +338,7 @@ static void mb_ble_cycle_verified(const char *how)
     }
     ESP_LOGI(TAG, "POC DONE %u/%u cycles verified with no manual reset",
              (unsigned)s_cycle, (unsigned)CONFIG_MB_BLE_POC_CYCLES);
-    mb_ble_status("OK");
+    mb_ble_emit(MB_EVENT_DONE, NULL, 0, 0);
     s_flash_done = true;
     ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
 }
@@ -339,8 +352,10 @@ static void mb_ble_region_answered(const mb_flash_notify_t *note)
         if (memcmp(note->hash, s_image->template_hash, sizeof(s_image->template_hash)) != 0) {
             /* The device refuses a mismatched DAL anyway; refusing here keeps the
              * failure at "we did not write" instead of a half-transfer. */
-            mb_ble_fail("E2", "DAL hash differs from our image: refusing to write "
-                              "(the board needs one USB bootstrap flash first)");
+            mb_ble_fail("E2",
+                        "DAL hash differs from our image: refusing to write "
+                        "(the board needs one USB bootstrap flash first)",
+                        "this micro:bit needs a fresh start");
             return;
         }
         ESP_LOGI(TAG, "DAL matches our template hash");
@@ -361,8 +376,10 @@ static void mb_ble_region_answered(const mb_flash_notify_t *note)
              note->hash[6], note->hash[7], holds_ours ? "holds" : "differs from");
 
     if (s_await_verify) {
+        mb_ble_emit(MB_EVENT_VERIFYING, NULL, 0, 0);
         if (!holds_ours) {
-            mb_ble_fail("E3", "region 2 does not hold the program after the transfer");
+            mb_ble_fail("E3", "region 2 does not hold the program after the transfer",
+                    "the program did not arrive intact");
             return;
         }
         mb_ble_cycle_verified("after the transfer");
@@ -377,7 +394,8 @@ static void mb_ble_region_answered(const mb_flash_notify_t *note)
     ESP_LOGI(TAG, "cycle %u/%u: streaming %u blocks from 0x%05X",
              (unsigned)(s_cycle + 1), (unsigned)CONFIG_MB_BLE_POC_CYCLES,
              (unsigned)s_image->block_count, s_image->region2_start);
-    mb_ble_status("F");
+    mb_ble_emit(MB_EVENT_FLASH_PROGRESS, NULL, 0,
+                (uint16_t)s_image->block_count);
     s_phase = MB_PHASE_STREAM;
     s_block = 0;
     s_packet = 0;
@@ -403,6 +421,8 @@ static void mb_ble_handle_notify(const struct os_mbuf *om)
             return;
         }
         s_block++;
+        mb_ble_emit(MB_EVENT_FLASH_PROGRESS, NULL, (uint16_t)s_block,
+                    (uint16_t)s_image->block_count);
         if (s_block < s_image->block_count) {
             if ((s_block % 16u) == 0) {
                 ESP_LOGI(TAG, "flashing %u/%u blocks", (unsigned)s_block,
@@ -430,7 +450,8 @@ static void mb_ble_handle_notify(const struct os_mbuf *om)
         ESP_LOGW(TAG, "device reported out-of-order; skipping to block %u",
                  (unsigned)s_block);
         if (s_resyncs > 4 || s_block >= s_image->block_count) {
-            mb_ble_fail("E3", "transfer abandoned after too many resyncs");
+            mb_ble_fail("E3", "transfer abandoned after too many resyncs",
+                    "the micro:bit stopped answering");
             return;
         }
         /* The device set its counter to the next block boundary; match it. */
@@ -690,6 +711,7 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
 static void mb_ble_scan(void)
 {
     mb_ble_mark_progress();
+    mb_ble_emit(MB_EVENT_AWAIT_MICROBIT, NULL, 0, 0);
     struct ble_gap_disc_params params = {0};
     params.passive = 0;
     params.filter_duplicates = 1;
@@ -757,7 +779,7 @@ static void mb_ble_task(void *param)
     vTaskDelete(NULL);
 }
 
-esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_flash_status_fn status)
+esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_event_fn status)
 {
     if (s_started) {
         return ESP_ERR_INVALID_STATE;
@@ -767,7 +789,7 @@ esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_flash_status_fn
         return ESP_ERR_INVALID_ARG;
     }
     s_image = image;
-    s_status = status;
+    s_event = status;
     s_cycle = 0;
     s_await_verify = false;
 

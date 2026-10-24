@@ -2,6 +2,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include "mb_event.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,7 +16,7 @@ extern "C" {
  *
  * Failure is non-fatal by design: the UI and Recovery keep running without it.
  */
-esp_err_t mb_voice_start(void);
+esp_err_t mb_voice_start(mb_event_fn status);
 
 #ifdef __cplusplus
 }

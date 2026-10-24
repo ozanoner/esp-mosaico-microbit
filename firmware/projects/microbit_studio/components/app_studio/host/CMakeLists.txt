@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(hello_backend LANGUAGES C)
+project(studio_backend LANGUAGES C)
 
 if(NOT ESP_GSP_COMPONENT_DIR AND DEFINED ENV{ESP_GSP_COMPONENT_DIR})
     set(ESP_GSP_COMPONENT_DIR "$ENV{ESP_GSP_COMPONENT_DIR}")
@@ -20,7 +20,7 @@ if(NOT EXISTS "${ESP_GSP_COMPONENT_DIR}/tools/sim_bridge/CMakeLists.txt")
 endif()
 
 add_subdirectory("${ESP_GSP_COMPONENT_DIR}/tools/sim_bridge" sim_bridge)
-gsp_add_backend(hello_backend
-    SOURCES ../app_hello.c platform_pc.c
-    INCLUDE_DIRECTORIES ../include
+gsp_add_backend(studio_backend
+    SOURCES ../app_studio.c platform_pc.c
+    INCLUDE_DIRECTORIES ../include ../../mb_event/include
     SCENES ../ui/main.json)
