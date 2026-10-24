@@ -45,11 +45,14 @@ class Build:
     block_count: int
     toolchain_id: str
     log: str
+    # The bytes the device actually streams (64-byte blocks, page-padded), so the
+    # firmware never has to parse Intel HEX on a 4 KB budget.
+    region2_data: bytes = b""
 
     def to_json(self, *, include_hex: bool = True) -> dict:
         payload = asdict(self)
         payload["region2"] = {"start": self.region2_start, "end": self.region2_end}
-        for key in ("region2_start", "region2_end", "hex_bytes"):
+        for key in ("region2_start", "region2_end", "hex_bytes", "region2_data"):
             payload.pop(key, None)
         if include_hex:
             payload["hex_b64"] = base64.b64encode(self.hex_bytes).decode("ascii")
@@ -117,6 +120,7 @@ def build(
             block_count=len(blocks),
             toolchain_id=cfg.toolchain_id,
             log=log[-4000:],
+            region2_data=b"".join(data for _, data in blocks),
         )
     finally:
         if not keep_workdir:

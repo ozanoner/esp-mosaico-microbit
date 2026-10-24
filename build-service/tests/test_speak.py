@@ -42,6 +42,7 @@ def stub_build(source: str, *, settings=None) -> Build:
         block_count=64,
         toolchain_id="mkc-1.3.6",
         log="",
+        region2_data=bytes(range(64)),
     )
 
 
@@ -138,6 +139,28 @@ def test_endpoint_can_omit_hex(monkeypatch) -> None:
     body = response.json()
     assert "hex_b64" not in body
     assert body["block_count"] == 64
+
+
+def test_endpoint_can_return_region2_binary(monkeypatch) -> None:
+    """The device path: bytes plus geometry in headers, no JSON, no hex."""
+    monkeypatch.setattr(app_module, "OpenAiCompatibleGenerator", lambda cfg: FakeGenerator(GOOD))
+    monkeypatch.setattr(
+        app_module, "generate_from_speech", lambda transcript, **kw: generate_program(transcript, generator=FakeGenerator(GOOD), build_fn=stub_build)
+    )
+    client = TestClient(app_module.app)
+    response = client.post("/v1/speak?region2=true", json={"text": "show a heart"})
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/octet-stream"
+    assert response.headers["X-Block-Count"] == "64"
+    assert response.headers["X-Program-Hash"] == "8f007d004500b100"
+    assert response.content == bytes(range(64))
+
+
+def test_region2_data_stays_out_of_json(monkeypatch) -> None:
+    """asdict() would put raw bytes in the JSON payload; it must be dropped."""
+    body = stub_build("x").to_json()
+    assert "region2_data" not in body
+    assert "hex_b64" in body
 
 
 def test_endpoint_returns_compiler_message_on_failure(monkeypatch) -> None:

@@ -12,7 +12,7 @@ generates code rather than packaging a release.
 from __future__ import annotations
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 import hexkit
@@ -57,7 +57,7 @@ def build_endpoint(request: BuildRequest) -> dict:
 
 
 @app.post("/v1/speak")
-async def speak_endpoint(request: Request, include_hex: bool = True) -> dict:
+async def speak_endpoint(request: Request, include_hex: bool = True, region2: bool = False):
     """Audio (or text) in, compiled image out.
 
     Accepts either `application/json` with {"text": ...} — used by tests and by
@@ -92,6 +92,23 @@ async def speak_endpoint(request: Request, include_hex: bool = True) -> dict:
         ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # `region2=true` returns only the bytes the device streams, with the
+    # geometry in headers: ~6 KB instead of 1.8 MB of base64, and no Intel HEX
+    # parsing on a chip that has other uses for its RAM.
+    if region2:
+        headers = {
+            "X-Region-Start": str(result.build.region2_start),
+            "X-Region-End": str(result.build.region2_end),
+            "X-Template-Hash": result.build.template_hash,
+            "X-Program-Hash": result.build.program_hash,
+            "X-Block-Count": str(result.build.block_count),
+        }
+        return Response(
+            content=result.build.region2_data,
+            media_type="application/octet-stream",
+            headers=headers,
+        )
 
     # `include_hex=false` keeps the reply small: the device needs the geometry
     # (hashes, block count) before deciding to pull 1.3 MB of base64 hex.
