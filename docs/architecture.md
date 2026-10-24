@@ -7,7 +7,7 @@ to sit between the kid's request and the micro:bit.
 
 ```
    kid's voice                LAN box                       ESP-Mosaico (esp32s31)              micro:bit v1
- ───────────────►  mic ──HTTPS──►  POST /v1/idea            ──►  parse hex, slice region 2   ──BLE──►  partial-flash
+ ───────────────►  mic ──HTTPS──►  POST /v1/speak            ──►  parse hex, slice region 2   ──BLE──►  partial-flash
                    AI button      ASR → LLM → mkc build         pack 64-byte blocks                   service
                                   → hex + region hashes         NimBLE central, notify-paced
                                   (toolchain pinned)            GSP UI, progress, verdict
@@ -23,7 +23,7 @@ the Mosaico, and API keys for ASR/LLM never leave the box.
 |---|---|---|
 | `GET /v1/health` | — | `toolchain_id`, editor version, DAL hash pinned |
 | `POST /v1/build` | `{ "source": "<main.ts>" }` | build object (below) |
-| `POST /v1/idea` | `audio/wav` (16 kHz mono, ≤15 s) | `transcript` + build object |
+| `POST /v1/speak` | `audio/wav` (16 kHz mono, ≤15 s) | `transcript` + build object |
 
 Build object:
 

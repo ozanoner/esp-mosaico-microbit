@@ -1,0 +1,43 @@
+menu "micro:bit voice (mb_voice)"
+
+    config MB_VOICE_SERVICE_URL
+        string "Build service URL for POST /v1/speak"
+        default "http://127.0.0.1:8477/v1/speak"
+        help
+            Full URL of the build service. The component appends
+            ?include_hex=false so the reply carries geometry only;
+            1.8 MB of base64 would not fit the device's needs here.
+
+    config MB_VOICE_MAX_SECONDS
+        int "Maximum recording length in seconds"
+        default 15
+        help
+            PSRAM buffer is 32 KB/s at 16 kHz mono 16-bit, so 15 s is 480 KB.
+
+    config MB_VOICE_REPLY_BYTES
+        int "Reply buffer size in bytes, allocated in PSRAM"
+        default 8192
+
+    config MB_WIFI_SSID
+        string "WiFi SSID for the build-service link"
+        default ""
+        help
+            Injected into the generated sdkconfig from .env at build time. Empty
+            falls back to whatever the retained firmware left in NVS.
+
+    config MB_WIFI_PASS
+        string "WiFi password for the build-service link"
+        default ""
+        help
+            Same injection path as the SSID. It ends up inside the installed
+            image, which is acceptable for a bench PoC but would be replaced by
+            per-device provisioning for anything shipped.
+
+    config MB_VOICE_SELFTEST_SECONDS
+        int "Bench self-test: record this many seconds after boot (0 = off)"
+        default 0
+        help
+            Records and posts once, N seconds after start, without the AI
+            button. For bench verification only; leave at 0 for the product.
+
+endmenu

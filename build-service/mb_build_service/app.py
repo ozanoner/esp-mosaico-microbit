@@ -1,20 +1,32 @@
-"""HTTP surface of the build service (PoC scope: build + health).
+"""HTTP surface of the build service.
 
-Speech and LLM endpoints are deliberately absent: the PoC validates the chain
-that carries the risk (compile -> hashes -> BLE flash). Voice arrives once a
-generated image has been proven to boot.
+`/v1/build` compiles source that already exists. `/v1/speak` is the voice entry
+point: audio (or text) in, a compiled image out, with one compiler-feedback
+retry. Both return the same geometry, because both feed the same flash path.
+
+The route is deliberately not called "idea": Espressif and the vendor's Ideas
+release API (`/api/v1/ideas/...`) already own that word, and this endpoint
+generates code rather than packaging a release.
 """
 
 from __future__ import annotations
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 import hexkit
 
 from .builder import BuildError, build
 from .config import settings
+from .providers import (
+    AsrConfig,
+    LlmConfig,
+    OpenAiCompatibleGenerator,
+    OpenAiCompatibleTranscriber,
+    ProviderError,
+)
+from .speak import SpeakError, generate_program as generate_from_speech
 
 app = FastAPI(title="esp-mosaico-microbit build service", version="0.1.0")
 
@@ -42,6 +54,65 @@ def build_endpoint(request: BuildRequest) -> dict:
     except hexkit.HexError as exc:
         raise HTTPException(status_code=502, detail={"error": f"hex geometry: {exc}"})
     return result.to_json()
+
+
+@app.post("/v1/speak")
+async def speak_endpoint(request: Request, include_hex: bool = True, region2: bool = False):
+    """Audio (or text) in, compiled image out.
+
+    Accepts either `application/json` with {"text": ...} — used by tests and by
+    the device when it sends a transcript for confirmation — or a raw WAV body
+    with any other content type, which goes through ASR first.
+    """
+    content_type = request.headers.get("content-type", "")
+    try:
+        if content_type.startswith("application/json"):
+            payload = await request.json()
+            transcript = (payload.get("text") or "").strip()
+            if not transcript:
+                raise HTTPException(status_code=422, detail="text is empty")
+        else:
+            audio = await request.body()
+            transcript = OpenAiCompatibleTranscriber(AsrConfig()).transcribe(audio)
+
+        generator = OpenAiCompatibleGenerator(LlmConfig())
+        result = generate_from_speech(transcript, generator=generator, settings=settings)
+    except ProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except SpeakError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": str(exc),
+                "transcript": exc.transcript,
+                "attempts": exc.attempts,
+                "compiler_message": exc.compiler_message,
+                "source": exc.source,
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # `region2=true` returns only the bytes the device streams, with the
+    # geometry in headers: ~6 KB instead of 1.8 MB of base64, and no Intel HEX
+    # parsing on a chip that has other uses for its RAM.
+    if region2:
+        headers = {
+            "X-Region-Start": str(result.build.region2_start),
+            "X-Region-End": str(result.build.region2_end),
+            "X-Template-Hash": result.build.template_hash,
+            "X-Program-Hash": result.build.program_hash,
+            "X-Block-Count": str(result.build.block_count),
+        }
+        return Response(
+            content=result.build.region2_data,
+            media_type="application/octet-stream",
+            headers=headers,
+        )
+
+    # `include_hex=false` keeps the reply small: the device needs the geometry
+    # (hashes, block count) before deciding to pull 1.3 MB of base64 hex.
+    return result.to_json(include_hex=include_hex)
 
 
 def run() -> None:

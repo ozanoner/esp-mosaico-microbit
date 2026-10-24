@@ -7,6 +7,7 @@
 #include "iris_screen_mirror.h"
 #include "mb_ble_central.h"
 #include "mb_mem_probe.h"
+#include "mb_voice.h"
 #include "nvs_flash.h"
 #include "ui_bundle.h"
 
@@ -53,6 +54,13 @@ void app_main(void)
     if (ble_err != ESP_OK) {
         ESP_LOGE(TAG, "BLE probe unavailable (%s); UI and Recovery stay up",
                  esp_err_to_name(ble_err));
+    }
+
+    /* Gate G3: push-to-talk. Hold the AI button, release to send the clip to
+     * POST /v1/speak. Failure here must not take the UI or Recovery down. */
+    const esp_err_t voice_err = mb_voice_start();
+    if (voice_err != ESP_OK) {
+        ESP_LOGE(TAG, "push-to-talk unavailable (%s)", esp_err_to_name(voice_err));
     }
 
     /* Publish HEALTHY only now that the product's own subsystems are up.
