@@ -54,4 +54,16 @@ void app_main(void)
         ESP_LOGE(TAG, "BLE probe unavailable (%s); UI and Recovery stay up",
                  esp_err_to_name(ble_err));
     }
+
+    /* Publish HEALTHY only now that the product's own subsystems are up.
+     * ESP-Iris never infers acceptance from Iris starting (esp_iris.h:194-202),
+     * so without this call a System Update installs and boots but is reported
+     * outcome_unknown, and with rollback enabled the bootloader has no
+     * acceptance to act on. */
+    const esp_err_t healthy_err = esp_iris_mark_healthy();
+    if (healthy_err != ESP_OK) {
+        ESP_LOGE(TAG, "could not publish HEALTHY (%s)", esp_err_to_name(healthy_err));
+    } else {
+        ESP_LOGI(TAG, "image accepted, HEALTHY published");
+    }
 }
