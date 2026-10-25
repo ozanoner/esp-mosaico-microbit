@@ -80,6 +80,7 @@ static uint32_t s_block;    /* index of the next block to send */
 static uint32_t s_packet;   /* transfer-wide packet counter, per the DAL */
 static uint32_t s_resyncs;
 static bool s_flash_done;   /* stop flashing, fall back to the STATUS probe */
+static bool s_started;     /* a cycle is in flight; cleared when it ends */
 
 /* ---- gate G4: the cycle driver -----------------------------------------
  *
@@ -118,6 +119,7 @@ static void mb_ble_fail(const char *code, const char *why, const char *kid)
     ESP_LOGE(TAG, "FAILED %s: %s", code, why);
     mb_ble_emit(MB_EVENT_FAILED, kid, 0, 0);
     s_flash_done = true;
+    s_started = false;   /* release the cycle: the next press must be able to start one */
     ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
 }
 
@@ -340,6 +342,7 @@ static void mb_ble_cycle_verified(const char *how)
              (unsigned)s_cycle, (unsigned)CONFIG_MB_BLE_POC_CYCLES);
     mb_ble_emit(MB_EVENT_DONE, NULL, 0, 0);
     s_flash_done = true;
+    s_started = false;   /* release the cycle: DONE, not bound forever */
     ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
 }
 
@@ -714,7 +717,12 @@ static void mb_ble_scan(void)
     mb_ble_emit(MB_EVENT_AWAIT_MICROBIT, NULL, 0, 0);
     struct ble_gap_disc_params params = {0};
     params.passive = 0;
-    params.filter_duplicates = 1;
+    /* Duplicate filtering must stay OFF: the micro:bit carries its name in the
+     * scan response, not the advertising packet (its service UUID does not fit
+     * in 31 bytes). With filtering on, the controller drops the second report
+     * from the same address, so the name never reaches the host and a board that
+     * every phone can see is invisible to this scan. */
+    params.filter_duplicates = 0;
 
     const int rc = ble_gap_disc(s_own_addr_type, MB_SCAN_FOREVER, &params, mb_ble_gap_event, NULL);
     if (rc != 0) {
@@ -754,7 +762,6 @@ static void mb_ble_host_task(void *param)
     nimble_port_freertos_deinit();
 }
 
-static bool s_started;
 
 static void mb_ble_task(void *param)
 {
@@ -782,7 +789,11 @@ static void mb_ble_task(void *param)
 esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_event_fn status)
 {
     if (s_started) {
-        return ESP_ERR_INVALID_STATE;
+        /* A second press while a cycle is still running must not fail the screen:
+         * the earlier cycle owns the radio, and reporting "the micro:bit could
+         * not be reached" for a duplicate request is a lie the child sees. */
+        ESP_LOGW(TAG, "cycle already running; ignoring duplicate start request");
+        return ESP_OK;
     }
     if (image == NULL || image->data == NULL || image->block_count == 0) {
         ESP_LOGE(TAG, "no image to flash: the build client must fetch one first");
@@ -792,6 +803,7 @@ esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_event_fn status
     s_event = status;
     s_cycle = 0;
     s_await_verify = false;
+    s_flash_done = false;
 
     /* NimBLE narrates every GAP/GATT procedure at INFO, which buries our own
      * lines: a single flash transfer produced ~3000 log lines of which ~40 were
