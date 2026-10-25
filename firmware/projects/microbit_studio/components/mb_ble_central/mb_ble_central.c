@@ -184,6 +184,11 @@ static void mb_ble_watch_task(void *arg)
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(2000));
         const uint32_t gap = (uint32_t)esp_log_timestamp() - s_last_progress_ms;
+        if (!s_started) {
+            /* No run in flight: keep the marker fresh so an idle board is quiet. */
+            mb_ble_mark_progress();
+            continue;
+        }
         if (gap > 6000u) {
             ESP_LOGW(TAG, "no progress for %u ms: phase=%d block=%u packet=%u connected=%d",
                      (unsigned)gap, (int)s_phase, (unsigned)s_block, (unsigned)s_packet,
@@ -482,8 +487,12 @@ static void mb_ble_handle_notify(const struct os_mbuf *om)
         ESP_LOGI(TAG, "STATUS pfs_version=%u mode=%u (%s)", note.pfs_version, note.mode,
                  note.mode == 1 ? "application" : "pairing");
         s_round++;
-        ESP_LOGI(TAG, "round %u complete, disconnecting", s_round);
-        ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        /* The probe answered: link and service are good. Clear the latch and carry
+         * on with the transfer on this same link, instead of hanging up and
+         * probing again for ever (that loop skipped every write). */
+        s_flash_done = false;
+        s_phase = MB_PHASE_REGION_DAL;
+        mb_ble_send_region_info(MB_FLASH_REGION_DAL);
         return;
 
     default:
@@ -810,13 +819,14 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
 
     case BLE_GAP_EVENT_DISCONNECT:
         s_connected = false;
-        {
-            static char dnote[24];
-            snprintf(dnote, sizeof(dnote), "d=%d sv=%u", event->disconnect.reason,
-                     s_svc_count);
-            mb_ble_emit(MB_EVENT_AWAIT_MICROBIT, dnote, 0, 0);
-        }
         ESP_LOGW(TAG, "disconnected: reason=%d", event->disconnect.reason);
+        /* A finished run (DONE, or a reported failure) must not rescan: the cycle
+         * is over until the pipeline asks for another image. Without this the
+         * board was reflashed-verified over and over on one button press. */
+        if (!s_started) {
+            ESP_LOGI(TAG, "run finished; staying idle");
+            return 0;
+        }
         /* No delay in this callback: it runs on the NimBLE host task, and
          * sleeping here stops HCI processing for the whole stack. The gap the
          * micro:bit needs after its own reset is a timer instead. */
