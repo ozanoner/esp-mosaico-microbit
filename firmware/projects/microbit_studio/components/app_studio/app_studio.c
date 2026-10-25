@@ -63,6 +63,7 @@ typedef struct {
 static const failure_line_t failure_lines[] = {
     {"the build box is not answering", "the build box is", "not answering"},
     {"the micro:bit stopped answering", "the micro:bit", "went quiet"},
+    {"the micro:bit could not be reached", "the micro:bit", "never answered"},
     {"the micro:bit went quiet", "the micro:bit", "went quiet"},
     {"the program did not arrive intact", "the program", "did not arrive"},
     {"this micro:bit needs a fresh start", "micro:bit needs", "a restart"},
