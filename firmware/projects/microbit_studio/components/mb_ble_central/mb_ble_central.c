@@ -81,6 +81,8 @@ static uint32_t s_block;    /* index of the next block to send */
 static uint32_t s_packet;   /* transfer-wide packet counter, per the DAL */
 static uint32_t s_resyncs;
 static bool s_flash_done;   /* stop flashing, fall back to the STATUS probe */
+static bool s_ble_inited;   /* NimBLE is initialised once per boot, never twice */
+static bool s_res_ready;    /* queue, timers and worker tasks exist */
 static bool s_started;            /* a cycle is in flight; cleared when it ends */
 static unsigned s_scan_reports;   /* diagnostic: reports heard this cycle */
 static char s_last_name[20] = "-"; /* diagnostic: last advertised name heard */
@@ -942,6 +944,16 @@ static void mb_ble_task(void *param)
 {
     (void)param;
 
+    if (s_ble_inited) {
+        /* The stack survives between runs. Re-initialising it fails with
+         * ESP_ERR_INVALID_STATE ("controller init failed"), which left every run
+         * after the first one stuck on CONNECTING with no scan. Just rescan. */
+        ESP_LOGI(TAG, "NimBLE already up; starting another scan");
+        mb_ble_scan_soon(0);
+        vTaskDelete(NULL);
+        return;
+    }
+
     const esp_err_t err = nimble_port_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "nimble_port_init failed: %s", esp_err_to_name(err));
@@ -957,6 +969,7 @@ static void mb_ble_task(void *param)
      * ble_svc_gap_device_name_set() is neither needed nor linked. */
     ble_store_config_init();
     nimble_port_freertos_init(mb_ble_host_task);
+    s_ble_inited = true;
 
     vTaskDelete(NULL);
 }
@@ -992,6 +1005,7 @@ esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_event_fn status
     ESP_LOGI(TAG, "probe build %s %s, reset_reason=%d",
              __DATE__, __TIME__, (int)esp_reset_reason());
 
+    if (!s_res_ready) {
     s_txq = xQueueCreate(8, sizeof(mb_tx_batch_t));
     s_tx_done = xSemaphoreCreateBinary();
     if (s_txq == NULL || s_tx_done == NULL) {
@@ -1027,6 +1041,8 @@ esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_event_fn status
     if (xTaskCreate(mb_ble_watch_task, "mb_ble_wd", 3072, NULL, 2, NULL) != pdPASS) {
         ESP_LOGE(TAG, "could not start the stall detector");
         return ESP_ERR_NO_MEM;
+    }
+    s_res_ready = true;
     }
 
     /* The host needs its own stack; the caller's task is the GSP/UI owner and
