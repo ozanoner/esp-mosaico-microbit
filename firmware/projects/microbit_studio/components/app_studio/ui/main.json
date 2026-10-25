@@ -93,7 +93,7 @@
       "font": "fonts/Fredoka-SemiBold.ttf",
       "fg_color": "#6B665E",
       "text_align": "center",
-      "font_charset": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :.+-_/A+B",
+      "font_charset": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :.,+-_/()\u2026A+B",
       "bind": "state",
       "bind_target": "text"
     },
@@ -114,7 +114,7 @@
       "font_size": 40,
       "fg_color": "#101010",
       "text_align": "center",
-      "font_charset": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :.+-_/A+B",
+      "font_charset": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :.,+-_/()\u2026A+B",
       "bind": "line1",
       "bind_target": "text"
     },
@@ -135,7 +135,7 @@
       "font_size": 40,
       "fg_color": "#101010",
       "text_align": "center",
-      "font_charset": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :.+-_/A+B",
+      "font_charset": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :.,+-_/()\u2026A+B",
       "bind": "line2",
       "bind_target": "text"
     },
@@ -152,7 +152,7 @@
       "font": "fonts/Fredoka-Medium.ttf",
       "fg_color": "#6B665E",
       "text_align": "center",
-      "font_charset": "()abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :.+-_/",
+      "font_charset": "()[]abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :.,+-_/\u2026",
       "bind": "hint",
       "bind_target": "text"
     },

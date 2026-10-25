@@ -333,6 +333,10 @@ esp_gsp_err_t app_studio_apply(app_studio_handle_t handle, const mb_event_t *eve
     case MB_EVENT_IMAGE_READY:
     case MB_EVENT_AWAIT_MICROBIT:
         go_to(studio, APP_STUDIO_AWAIT_MICROBIT, NULL);
+        /* Diagnostic text from the scan (e.g. "seen 20") replaces the hint. */
+        if (event->detail != NULL && event->detail[0] != '\0') {
+            remember_error(studio, gsp_studio_hint_set_text(studio->ui, event->detail));
+        }
         break;
     case MB_EVENT_FLASH_PROGRESS: {
         if (studio->state != APP_STUDIO_FLASHING && studio->state != APP_STUDIO_VERIFYING) {

@@ -80,7 +80,9 @@ static uint32_t s_block;    /* index of the next block to send */
 static uint32_t s_packet;   /* transfer-wide packet counter, per the DAL */
 static uint32_t s_resyncs;
 static bool s_flash_done;   /* stop flashing, fall back to the STATUS probe */
-static bool s_started;     /* a cycle is in flight; cleared when it ends */
+static bool s_started;            /* a cycle is in flight; cleared when it ends */
+static unsigned s_scan_reports;   /* diagnostic: reports heard this cycle */
+static char s_last_name[20] = "-"; /* diagnostic: last advertised name heard */
 
 /* ---- gate G4: the cycle driver -----------------------------------------
  *
@@ -137,6 +139,9 @@ static void mb_ble_scan(void);
  * run on the NimBLE host task, and sleeping there stops HCI processing for the
  * whole stack. */
 static esp_timer_handle_t s_scan_timer;
+static esp_timer_handle_t s_connect_timer;
+static ble_addr_t s_peer_addr;
+static void mb_ble_connect_now(void *arg);
 
 static void mb_ble_scan_timer_cb(void *arg)
 {
@@ -633,6 +638,18 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
     switch (event->type) {
     case BLE_GAP_EVENT_DISC: {
         struct ble_hs_adv_fields fields;
+        s_scan_reports++;
+        if (ble_hs_adv_parse_fields(&fields, event->disc.data, event->disc.length_data) == 0 &&
+            fields.name != NULL && fields.name_len > 0) {
+            size_t n = fields.name_len < sizeof(s_last_name) - 1 ? fields.name_len : sizeof(s_last_name) - 1;
+            memcpy(s_last_name, fields.name, n);
+            s_last_name[n] = '\0';
+        }
+        if ((s_scan_reports % 5u) == 0u) {
+            static char note[40];
+            snprintf(note, sizeof(note), "seen %u %s", (unsigned)s_scan_reports, s_last_name);
+            mb_ble_emit(MB_EVENT_AWAIT_MICROBIT, note, 0, 0);
+        }
         if (ble_hs_adv_parse_fields(&fields, event->disc.data, event->disc.length_data) != 0) {
             return 0;
         }
@@ -642,19 +659,12 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
         }
         ESP_LOGI(TAG, "found peer '%.*s'", fields.name_len, (const char *)fields.name);
 
-        /* Scanning must stop before connecting. */
-        if (ble_gap_disc_cancel() != 0) {
-            return 0;
-        }
-        if (ble_hs_id_infer_auto(0, &s_own_addr_type) != 0) {
-            ESP_LOGE(TAG, "could not infer our address type");
-            return 0;
-        }
-        const int rc = ble_gap_connect(s_own_addr_type, &event->disc.addr, MB_CONNECT_TIMEOUT_MS,
-                                       NULL, mb_ble_gap_event, NULL);
-        if (rc != 0) {
-            ESP_LOGE(TAG, "connect failed to start: rc=%d", rc);
-            mb_ble_scan();
+        s_peer_addr = event->disc.addr;
+        if (s_connect_timer != NULL) {
+            (void)esp_timer_stop(s_connect_timer);
+            (void)esp_timer_start_once(s_connect_timer, 1000);
+        } else {
+            mb_ble_connect_now(NULL);
         }
         return 0;
     }
@@ -708,6 +718,26 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
 
     default:
         return 0;
+    }
+}
+
+/* Runs off the NimBLE host task. Cancelling discovery from inside the GAP event
+ * callback returns EBUSY, so the connect was never issued and the panel kept
+ * scanning for ever after it had already found the board. */
+static void mb_ble_connect_now(void *arg)
+{
+    (void)arg;
+    (void)ble_gap_disc_cancel();
+    if (ble_hs_id_infer_auto(0, &s_own_addr_type) != 0) {
+        ESP_LOGE(TAG, "could not infer our address type");
+        mb_ble_scan_soon(200);
+        return;
+    }
+    const int rc = ble_gap_connect(s_own_addr_type, &s_peer_addr, MB_CONNECT_TIMEOUT_MS,
+                                   NULL, mb_ble_gap_event, NULL);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "connect failed to start: rc=%d", rc);
+        mb_ble_scan_soon(200);
     }
 }
 
@@ -831,6 +861,13 @@ esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_event_fn status
         ESP_LOGW(TAG, "no timer for the inter-cycle gap; scans stay immediate");
         s_scan_timer = NULL;
     }
+    const esp_timer_create_args_t connect_args = {
+        .callback = mb_ble_connect_now,
+        .name = "mb_ble_conn",
+    };
+    if (esp_timer_create(&connect_args, &s_connect_timer) != ESP_OK) {
+        s_connect_timer = NULL;
+    }
     if (xTaskCreate(mb_ble_tx_task, "mb_ble_tx", 4096, NULL, 4, NULL) != pdPASS) {
         ESP_LOGE(TAG, "could not start the tx task");
         return ESP_ERR_NO_MEM;
@@ -847,6 +884,9 @@ esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_event_fn status
         ESP_LOGE(TAG, "could not create the BLE task");
         return ESP_ERR_NO_MEM;
     }
+    s_scan_reports = 0;
+    s_last_name[0] = '-';
+    s_last_name[1] = '\0';
     s_started = true;
     return ESP_OK;
 }
