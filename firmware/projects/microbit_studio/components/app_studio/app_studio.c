@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "bundle_gsp.h"
 
@@ -15,7 +16,9 @@
 #define DONE_DWELL_MS 10000
 #define SEG_BLINK_MS 500
 
-#define RITUAL_TEXT "hold A+B, then tap reset"
+/* Two lines: at 40 px the sentence is 433 px and the column gives 288. */
+#define RITUAL_LINE1 "hold A+B, then"
+#define RITUAL_LINE2 "tap reset"
 
 /* Bear bob: the scene declares bear.y dynamic over 186..194. */
 #define BEAR_BOB_MS 600
@@ -28,25 +31,54 @@
 /* One row per screen: what the app column says and which extras are on. */
 typedef struct {
     const char *headline;
-    const char *detail;
+    const char *line1;
+    const char *line2;
     bool bear;
     bool progress;
     bool success;
 } studio_screen_t;
 
 static const studio_screen_t screens[APP_STUDIO_STATE_COUNT] = {
-    [APP_STUDIO_IDLE] = {"IDLE", "hold the AI button and speak", true, false, false},
-    [APP_STUDIO_LISTENING] = {"LISTENING", "listening…", true, false, false},
-    [APP_STUDIO_BUILDING] = {"BUILDING", "building your program…", true, false, false},
-    /* AWAIT_MICROBIT does not fit the 2/3 column at 40 px (336 px needed), and
-     * "PAIRING" would be wrong: gate G2 measured mode=1, no pairing is used. */
-    [APP_STUDIO_AWAIT_MICROBIT] = {"CONNECTING", "waiting for micro:bit…", true, false, false},
-    [APP_STUDIO_FLASHING] = {"FLASHING", "", true, true, false},
-    [APP_STUDIO_VERIFYING] = {"VERIFYING", "checking your program…", true, false, false},
-    /* No success text: the trophy clip is the whole message. */
-    [APP_STUDIO_DONE] = {"", "", false, false, true},
-    [APP_STUDIO_FAILED] = {"FAILED", "", false, false, false},
+    [APP_STUDIO_IDLE] = {"IDLE", "", "hold and speak", true, false, false},
+    [APP_STUDIO_LISTENING] = {"LISTENING", "", "listening\u2026", true, false, false},
+    [APP_STUDIO_BUILDING] = {"BUILDING", "building your", "program\u2026", true, false, false},
+    /* CONNECTING, not AWAIT_MICROBIT: at 40 px that name is 336 px and the column
+     * gives 288, and "PAIRING" would be wrong because gate G2 measured mode=1. */
+    [APP_STUDIO_AWAIT_MICROBIT] = {"CONNECTING", "waiting for", "micro:bit\u2026", true, false, false},
+    [APP_STUDIO_FLASHING] = {"FLASHING", "", "", true, true, false},
+    [APP_STUDIO_VERIFYING] = {"VERIFYING", "checking your", "program\u2026", true, false, false},
+    /* No success text: the still frame is the whole message. */
+    [APP_STUDIO_DONE] = {"", "", "", false, false, true},
+    [APP_STUDIO_FAILED] = {"FAILED", "", "", false, false, false},
 };
+
+/* Failure sentences are authored at 40 px, so each is split where it reads as a
+ * phrase inside a 288 px column. Unknown sentences land on one line and clip. */
+typedef struct {
+    const char *sentence;
+    const char *line1;
+    const char *line2;
+} failure_line_t;
+
+static const failure_line_t failure_lines[] = {
+    {"the build box is not answering", "the build box is", "not answering"},
+    {"the micro:bit stopped answering", "the micro:bit", "went quiet"},
+    {"the micro:bit went quiet", "the micro:bit", "went quiet"},
+    {"the program did not arrive intact", "the program", "did not arrive"},
+    {"this micro:bit needs a fresh start", "micro:bit needs", "a restart"},
+    {"I could not hear that", "I could not", "hear that"},
+    {"I cannot reach the build box", "I cannot reach", "the build box"},
+};
+
+static const failure_line_t *find_failure(const char *sentence)
+{
+    for (size_t i = 0; i < sizeof(failure_lines) / sizeof(failure_lines[0]); ++i) {
+        if (strcmp(failure_lines[i].sentence, sentence) == 0) {
+            return &failure_lines[i];
+        }
+    }
+    return NULL;
+}
 
 static const char *const state_names[APP_STUDIO_STATE_COUNT] = {
     "IDLE", "LISTENING", "BUILDING", "AWAIT_MICROBIT",
@@ -157,7 +189,8 @@ static void show_screen(struct app_studio *studio, app_studio_state_t state)
     const studio_screen_t *screen = &screens[state];
     studio->state = state;  /* paint_segments reads it for the track row */
     remember_error(studio, gsp_studio_state_set_text(studio->ui, screen->headline));
-    remember_error(studio, gsp_studio_detail_set_text(studio->ui, screen->detail));
+    remember_error(studio, gsp_studio_line1_set_text(studio->ui, screen->line1));
+    remember_error(studio, gsp_studio_line2_set_text(studio->ui, screen->line2));
     remember_error(studio, gsp_studio_bear_set_visible(studio->ui, screen->bear));
     remember_error(studio, gsp_studio_success_set_visible(studio->ui, screen->success));
     stop_timer(studio, &studio->bob_timer);
@@ -193,12 +226,24 @@ static void show_ritual(esp_gsp_handle_t ui, void *ctx)
     if (studio->state != APP_STUDIO_AWAIT_MICROBIT) {
         return;
     }
-    remember_error(studio, gsp_studio_detail_set_text(ui, RITUAL_TEXT));
+    remember_error(studio, gsp_studio_line1_set_text(ui, RITUAL_LINE1));
+    remember_error(studio, gsp_studio_line2_set_text(ui, RITUAL_LINE2));
 }
 
 static bool is_terminal(app_studio_state_t state)
 {
     return state == APP_STUDIO_DONE || state == APP_STUDIO_FAILED;
+}
+
+/* A cycle is on screen only between the button press and its verdict. Outside
+ * that window the panel owns the state: the BLE scanner keeps running after a
+ * failure, so late AWAIT_MICROBIT / FLASH_PROGRESS reports would otherwise pull
+ * DONE, FAILED or the IDLE after them back into CONNECTING. */
+static bool cycle_on_screen(app_studio_state_t state)
+{
+    return state == APP_STUDIO_LISTENING || state == APP_STUDIO_BUILDING ||
+           state == APP_STUDIO_AWAIT_MICROBIT || state == APP_STUDIO_FLASHING ||
+           state == APP_STUDIO_VERIFYING;
 }
 
 esp_gsp_err_t app_studio_create(esp_gsp_handle_t ui, app_studio_handle_t *out_handle)
@@ -229,7 +274,11 @@ static void go_to(struct app_studio *studio, app_studio_state_t state,
     studio->solid_segments = 0;
     show_screen(studio, state);
     if (state == APP_STUDIO_FAILED && failure != NULL) {
-        remember_error(studio, gsp_studio_detail_set_text(studio->ui, failure));
+        const failure_line_t *lines = find_failure(failure);
+        remember_error(studio, gsp_studio_line1_set_text(
+                                  studio->ui, lines != NULL ? lines->line1 : failure));
+        remember_error(studio, gsp_studio_line2_set_text(
+                                  studio->ui, lines != NULL ? lines->line2 : ""));
     }
     if (state == APP_STUDIO_AWAIT_MICROBIT) {
         studio->ritual_timer = esp_gsp_timer_create(studio->ui, RITUAL_AFTER_MS,
@@ -253,11 +302,20 @@ esp_gsp_err_t app_studio_apply(app_studio_handle_t handle, const mb_event_t *eve
         return ESP_GSP_ERR_INVALID_ARG;
     }
     struct app_studio *studio = handle;
+
+    /* Only a new button press may interrupt a finished screen; everything else
+     * has to belong to the cycle currently on screen. */
+    if (event->kind != MB_EVENT_LISTENING_STARTED && !cycle_on_screen(studio->state)) {
+        return ESP_GSP_OK;
+    }
     switch (event->kind) {
     case MB_EVENT_LISTENING_STARTED:
         go_to(studio, APP_STUDIO_LISTENING, NULL);
         break;
     case MB_EVENT_LISTENING_STOPPED:
+        /* Stay on LISTENING: BUILDING is reported by voice when the request is
+         * actually on the wire, not when the finger comes off the button. */
+        break;
     case MB_EVENT_BUILD_STARTED:
         go_to(studio, APP_STUDIO_BUILDING, NULL);
         break;

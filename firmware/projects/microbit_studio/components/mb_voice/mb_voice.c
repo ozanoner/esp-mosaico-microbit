@@ -123,14 +123,44 @@ static void log_reply(int status, const reply_t *reply)
     }
 }
 
+static void emit(mb_event_kind_t kind, const char *detail)
+{
+    if (s_event != NULL) {
+        const mb_event_t event = {.kind = kind, .detail = detail};
+        s_event(&event);
+    }
+}
+
+/* A press can land before the station has an address, and the POST would then
+ * fail instantly — which used to be reported as "I could not hear that". Wait for
+ * the address, and say what actually went wrong. */
+static bool wait_for_ip(int timeout_s)
+{
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta == NULL) {
+        return false;
+    }
+    for (int waited = 0; waited < timeout_s * 4; ++waited) {
+        esp_netif_ip_info_t ip;
+        if (esp_netif_get_ip_info(sta, &ip) == ESP_OK && ip.ip.addr != 0) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(250));
+    }
+    return false;
+}
+
 static void post_wav(const uint8_t *wav, size_t len)
 {
+    if (!wait_for_ip(CONFIG_MB_VOICE_IP_WAIT_S)) {
+        ESP_LOGE(TAG, "no address after %d s; not sending", CONFIG_MB_VOICE_IP_WAIT_S);
+        emit(MB_EVENT_FAILED, "I cannot reach the build box");
+        return;
+    }
+
     /* From here the service is doing ASR, LLM and the compile, which is what the
      * panel's BUILDING screen describes. Nothing is reported before this point. */
-    if (s_event != NULL) {
-        const mb_event_t building = {.kind = MB_EVENT_BUILD_STARTED};
-        s_event(&building);
-    }
+    emit(MB_EVENT_BUILD_STARTED, NULL);
 
     char url[192];
     snprintf(url, sizeof(url), "%s?include_hex=false", CONFIG_MB_VOICE_SERVICE_URL);
@@ -173,15 +203,18 @@ static void post_wav(const uint8_t *wav, size_t len)
     const esp_err_t err = esp_http_client_perform(client);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "POST failed: %s", esp_err_to_name(err));
-        if (s_event != NULL) {
-            const mb_event_t failure = {.kind = MB_EVENT_FAILED,
-                                        .detail = "I could not hear that"};
-            s_event(&failure);
-        }
+        emit(MB_EVENT_FAILED, "I cannot reach the build box");
     } else {
-        log_reply(esp_http_client_get_status_code(client), &reply);
-        if (esp_http_client_get_status_code(client) == 200 && s_done != NULL) {
-            s_done();
+        const int status = esp_http_client_get_status_code(client);
+        log_reply(status, &reply);
+        if (status == 200) {
+            if (s_done != NULL) {
+                s_done();
+            }
+        } else {
+            /* The service answered and refused the take: that is the only case
+             * where "I could not hear that" is true. */
+            emit(MB_EVENT_FAILED, "I could not hear that");
         }
     }
 
