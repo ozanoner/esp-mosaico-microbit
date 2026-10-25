@@ -69,3 +69,24 @@ first two are secrets, the last is bench-dependent. A build that skips this step
 compiles with an empty SSID and a `127.0.0.1` service URL, so the panel reports
 "cannot reach the build box" while the service is perfectly healthy. Inject them
 before building, then rebuild so the values are compiled in.
+
+## Testing before hardware
+
+`tools/preflight/preflight.sh` is the gate: nothing gets installed on a panel
+until it passes. It needs no board, no microphone and no button.
+
+| Step | Catches |
+|---|---|
+| state machine (host, 15 cases) | wrong transitions, silent wiring, stale events repainting a finished screen, unmapped failure sentences |
+| text fit | any string that would clip its column, measured with the real TTF |
+| scene budget | a scene whose startup decode could trip the watchdog (animation peak, bundle size) |
+| bench configuration | an empty SSID or a `127.0.0.1` service URL — the build that says "cannot reach the build box" |
+| build service (audio) | ASR → LLM → `mkc` → region-2 bytes, replayed with fixtures instead of a person speaking |
+
+Audio fixtures are generated once with `piper` and committed under
+`tools/preflight/fixtures/` (`command.wav`, `short.wav`, `silence.wav`).
+
+For a run with nobody present, configure `CONFIG_MB_VOICE_BENCH_WAV=y`: the firmware
+then posts `components/mb_voice/bench/command.wav` through the real pipeline about
+5 s after boot, so `LISTENING → … → DONE` can be captured from `iris screenshot`
+without a button press. Never enable it in a shipped build.

@@ -418,6 +418,29 @@ static void wifi_task(void *arg)
     vTaskDelete(NULL);
 }
 
+#if CONFIG_MB_VOICE_BENCH_WAV
+/* Bench: feed a known WAV through the real pipeline, with no microphone and no
+ * button, so a full run can be captured without a person present. */
+extern const uint8_t bench_wav_start[] asm("_binary_command_wav_start");
+extern const uint8_t bench_wav_end[] asm("_binary_command_wav_end");
+
+static void bench_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(5000)); /* let the station associate */
+
+    if (s_event != NULL) {
+        mb_event_t event = {.kind = MB_EVENT_LISTENING_STARTED};
+        s_event(&event);
+        event.kind = MB_EVENT_LISTENING_STOPPED;
+        s_event(&event);
+    }
+    ESP_LOGW(TAG, "bench: posting the embedded fixture");
+    post_wav(bench_wav_start, (size_t)(bench_wav_end - bench_wav_start));
+    vTaskDelete(NULL);
+}
+#endif
+
 esp_err_t mb_voice_start(mb_event_fn status, mb_voice_done_fn on_captured)
 {
     if (s_wav != NULL) {
@@ -500,6 +523,11 @@ esp_err_t mb_voice_start(mb_event_fn status, mb_voice_done_fn on_captured)
     }
 #endif
 
+#if CONFIG_MB_VOICE_BENCH_WAV
+    if (xTaskCreate(bench_task, "mb_voice_bench", 8192, NULL, 4, NULL) != pdPASS) {
+        ESP_LOGW(TAG, "bench task could not start");
+    }
+#endif
     ESP_LOGI(TAG, "push-to-talk ready: hold the AI button, release to send to %s",
              CONFIG_MB_VOICE_SERVICE_URL);
     return ESP_OK;

@@ -49,4 +49,12 @@ menu "micro:bit voice (mb_voice)"
             reporting a network failure as a recognition failure, which is what
             the panel shows the child.
 
+
+    config MB_VOICE_BENCH_WAV
+        bool "Post an embedded WAV at boot instead of using the microphone"
+        default n
+        help
+            Bench only. Lets an end-to-end run (speech -> build -> flash) happen
+            with nobody pressing the button, using tools/preflight/fixtures.
+            Never enable this in a shipped build.
 endmenu
