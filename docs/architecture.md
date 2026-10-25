@@ -63,19 +63,22 @@ Device operations go through `mosaico.py` only.
 State machine — every state is a screen, not a log line:
 
 ```
-IDLE → LISTENING → TRANSCRIBED (confirm transcript, tap) → GENERATING → BUILDING
-     → AWAIT_MICROBIT (pairing-mode prompt) → FLASHING (blocks left) → VERIFYING
-     → DONE | FAILED(reason)
+IDLE → LISTENING → BUILDING → CONNECTING → FLASHING → VERIFYING → DONE | FAILED
 ```
 
-Two decisions baked in:
+What the screens show, and why the chain is this short:
 
-- **Confirm the transcript before building.** ASR errors are the most likely
-  failure and cost a 40-second build each; one tap kills that class of bug.
-- **Overlap the physical ritual with the build.** While the box compiles, the
-  screen prompts "hold A+B, tap reset". Generated programs also call
-  `bluetooth.startUartService()` at boot so the *next* flash needs no ritual —
-  to be proven at gate G2, not assumed.
+- **No transcript confirm, no separate GENERATING screen.** `/v1/speak` runs ASR →
+  LLM → `mkc` inside one request, so the device never holds a transcript to
+  confirm and cannot tell the generation phase from the compile. Both would be
+  guessed, so neither is shown.
+- **`CONNECTING` is the `AWAIT_MICROBIT` state.** Gate G2 measured `EE 01 01` →
+  `mode=1 (application)`, so a board running our template advertises by itself
+  and the ritual is a fallback: if no micro:bit answers within 15 s the detail
+  line becomes "hold A+B, then tap reset" and the scan keeps running.
+- **FLASHING is five segments of 20 %.** The segment being written pulses at
+  500 ms; finished segments stay solid. No block counts reach the screen.
+- **DONE shows the trophy clip only** — no success text.
 
 ### RAM budget
 

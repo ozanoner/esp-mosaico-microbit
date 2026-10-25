@@ -57,6 +57,7 @@ static uint16_t s_round;             /* completed probe rounds, for the log */
 static bool s_connected;             /* a link is up; read by the tx task */
 static volatile uint32_t s_last_progress_ms; /* last time the BLE path moved */
 static uint16_t s_chr_val_handle;    /* discovered value handle, 0 = none */
+static uint16_t s_svc_start_handle;
 static uint16_t s_svc_end_handle;    /* end of the partial-flash service */
 static bool s_cccd_pending;          /* subscribe write started for this round */
 
@@ -79,7 +80,15 @@ static uint16_t s_conn_handle;
 static uint32_t s_block;    /* index of the next block to send */
 static uint32_t s_packet;   /* transfer-wide packet counter, per the DAL */
 static uint32_t s_resyncs;
+static uint32_t s_ack_packets;   /* packets acknowledged in the current block */
 static bool s_flash_done;   /* stop flashing, fall back to the STATUS probe */
+static bool s_ble_inited;   /* NimBLE is initialised once per boot, never twice */
+static bool s_res_ready;    /* queue, timers and worker tasks exist */
+static bool s_started;            /* a cycle is in flight; cleared when it ends */
+static unsigned s_scan_reports;   /* diagnostic: reports heard this cycle */
+static char s_last_name[20] = "-"; /* diagnostic: last advertised name heard */
+static int s_last_status = -1;
+static char s_sv[40] = "";     /* diagnostic: last connect status seen */
 
 /* ---- gate G4: the cycle driver -----------------------------------------
  *
@@ -94,23 +103,31 @@ static bool s_flash_done;   /* stop flashing, fall back to the STATUS probe */
  *        no  → FAILED, screen shows E3
  */
 static const mb_flash_image_t *s_image;
-static mb_flash_status_fn s_status;
+static mb_event_fn s_event;
 static uint32_t s_cycle;        /* cycles verified so far */
 static bool s_await_verify;     /* a transfer landed; this connection verifies it */
 static bool s_peer_seen;        /* a micro:bit answered at least once */
 
-static void mb_ble_status(const char *text)
+static void mb_ble_emit(mb_event_kind_t kind, const char *detail,
+                         uint16_t done, uint16_t total)
 {
-    if (s_status != NULL) {
-        s_status(text);
+    if (s_event != NULL) {
+        const mb_event_t event = {
+            .kind = kind,
+            .detail = detail,
+            .progress_done = done,
+            .progress_total = total,
+        };
+        s_event(&event);
     }
 }
 
-static void mb_ble_fail(const char *state, const char *why)
+static void mb_ble_fail(const char *code, const char *why, const char *kid)
 {
-    ESP_LOGE(TAG, "FAILED: %s", why);
-    mb_ble_status(state);
+    ESP_LOGE(TAG, "FAILED %s: %s", code, why);
+    mb_ble_emit(MB_EVENT_FAILED, kid, 0, 0);
     s_flash_done = true;
+    s_started = false;   /* release the cycle: the next press must be able to start one */
     ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
 }
 
@@ -128,6 +145,13 @@ static void mb_ble_scan(void);
  * run on the NimBLE host task, and sleeping there stops HCI processing for the
  * whole stack. */
 static esp_timer_handle_t s_scan_timer;
+static esp_timer_handle_t s_connect_timer;
+static esp_timer_handle_t s_disc_timer;
+static bool s_pfs_found;
+static ble_addr_t s_peer_addr;
+static bool s_connecting;
+static unsigned s_last_evt;
+static void mb_ble_connect_now(void *arg);
 
 static void mb_ble_scan_timer_cb(void *arg)
 {
@@ -163,6 +187,11 @@ static void mb_ble_watch_task(void *arg)
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(2000));
         const uint32_t gap = (uint32_t)esp_log_timestamp() - s_last_progress_ms;
+        if (!s_started) {
+            /* No run in flight: keep the marker fresh so an idle board is quiet. */
+            mb_ble_mark_progress();
+            continue;
+        }
         if (gap > 6000u) {
             ESP_LOGW(TAG, "no progress for %u ms: phase=%d block=%u packet=%u connected=%d",
                      (unsigned)gap, (int)s_phase, (unsigned)s_block, (unsigned)s_packet,
@@ -175,7 +204,9 @@ static void mb_ble_watch_task(void *arg)
             esp_log_timestamp() > (uint32_t)CONFIG_MB_BLE_PEER_TIMEOUT_S * 1000u) {
             ESP_LOGE(TAG, "no micro:bit within %d s; check the board is advertising",
                      CONFIG_MB_BLE_PEER_TIMEOUT_S);
-            mb_ble_status("E4");
+            /* Not a failure: the panel keeps waiting and promotes the ritual
+             * prompt on its own timer, so the flow can continue the moment a
+             * board answers. */
             s_peer_seen = true; /* report once */
         }
     }
@@ -225,27 +256,19 @@ static void mb_ble_tx_task(void *arg)
             if (!s_connected) {
                 break;
             }
-            (void)xSemaphoreTake(s_tx_done, 0);
-            s_write_error = 0;
-            const int rc = ble_gattc_write_flat(s_conn_handle, s_chr_val_handle, batch.data[i],
-                                                MB_FLASH_PACKET_BYTES, mb_ble_on_packet_write, NULL);
+            /* The data characteristic is WRITE_WITHOUT_RESPONSE (protocol doc
+             * line 12). A Write Request is rejected by the DAL with ATT 0x07 and
+             * the link drops; pace the packets here instead and let the device's
+             * 01 FF / 01 AA notifications drive progress. */
+            const int rc = ble_gattc_write_no_rsp_flat(s_conn_handle, s_chr_val_handle,
+                                                       batch.data[i], MB_FLASH_PACKET_BYTES);
             if (rc != 0) {
-                ESP_LOGE(TAG, "packet %u failed to start: rc=%d", i, rc);
-                mb_ble_fail("E3", "the radio refused a packet");
+                ESP_LOGE(TAG, "packet %u failed to queue: rc=%d", i, rc);
+                mb_ble_fail("E3", "the radio refused a packet",
+                    "the micro:bit stopped answering");
                 break;
             }
-            if (xSemaphoreTake(s_tx_done, pdMS_TO_TICKS(CONFIG_MB_BLE_ACK_TIMEOUT_MS)) != pdTRUE) {
-                /* Measured on hardware: the ATT response to the first packet of
-                 * a cold board arrived 300 ms *after* a 2 s deadline, and a
-                 * warm board answers each block in ~480 ms. 2 s was the bug,
-                 * not the link. */
-                mb_ble_fail("E3", "packet ack timed out");
-                break;
-            }
-            if (s_write_error != 0) {
-                mb_ble_fail("E3", "the peer rejected a packet");
-                break;
-            }
+            vTaskDelay(pdMS_TO_TICKS(12));
         }
     }
 }
@@ -268,26 +291,42 @@ static void mb_ble_send_region_info(uint8_t region)
 
 static void mb_ble_send_end_of_tx(void)
 {
-    const uint32_t last = s_image->region2_start +
-                          (s_image->block_count - 1u) * MB_FLASH_BLOCK_BYTES;
-    mb_flash_build_end_of_tx(s_tx[0], last);
-    mb_ble_enqueue(1);
+    /* END_OF_TX carries no payload (protocol doc, opcode table). Queueing it as a
+     * 20-byte packet made the DAL ignore it: no 0x02 0x00 notification ever came
+     * back, the source magic was never stripped and the board kept running the
+     * previous program even though region 2 already held the new one. */
+    const uint8_t end_of_tx = MB_FLASH_CMD_END_OF_TX;
+    int rc = ble_gattc_write_no_rsp_flat(s_conn_handle, s_chr_val_handle, &end_of_tx, 1);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "END_OF_TX failed: rc=%d", rc);
+    }
+    /* Then ask it to reboot into the application so the new program actually runs. */
+    vTaskDelay(pdMS_TO_TICKS(120));
+    const uint8_t reset[2] = { MB_FLASH_CMD_RESET, 0x01 };
+    rc = ble_gattc_write_no_rsp_flat(s_conn_handle, s_chr_val_handle, reset, sizeof(reset));
+    if (rc != 0) {
+        ESP_LOGE(TAG, "RESET failed: rc=%d", rc);
+    }
 }
 
 static void mb_ble_send_block(uint32_t index)
 {
     const uint32_t offset = index * MB_FLASH_BLOCK_BYTES;
     if (offset + MB_FLASH_BLOCK_BYTES > s_image->len) {
-        mb_ble_fail("E3", "block index past the fetched image");
+        mb_ble_fail("E3", "block index past the fetched image",
+                    "the program did not arrive intact");
         return;
     }
 
     mb_flash_build_block(s_tx, s_image->region2_start + offset, s_image->data + offset);
 
     for (uint32_t i = 0; i < MB_FLASH_PACKETS_PER_BLOCK; i++) {
-        /* The DAL compares data[3] with a counter that runs across the whole
-         * transfer (packetCount++) instead of restarting per block, so stamping
-         * the running value is what stops the device answering 0xAA on block 2. */
+        /* data[3] is a TRANSFER-WIDE packet counter, compared by the DAL against
+         * its own running packetCount (MicroBitPartialFlashingService.cpp:217-241).
+         * Stamping a per-block index makes every packet after the first block
+         * look like it came from a previous batch, and the device drops it
+         * silently (line 229) — which is exactly the stall we chased. The address
+         * split uses the device's internal blockNum, not this byte. */
         s_tx[i][3] = (uint8_t)(s_packet + i);
     }
 
@@ -325,8 +364,9 @@ static void mb_ble_cycle_verified(const char *how)
     }
     ESP_LOGI(TAG, "POC DONE %u/%u cycles verified with no manual reset",
              (unsigned)s_cycle, (unsigned)CONFIG_MB_BLE_POC_CYCLES);
-    mb_ble_status("OK");
+    mb_ble_emit(MB_EVENT_DONE, NULL, 0, 0);
     s_flash_done = true;
+    s_started = false;   /* release the cycle: DONE, not bound forever */
     ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
 }
 
@@ -339,8 +379,10 @@ static void mb_ble_region_answered(const mb_flash_notify_t *note)
         if (memcmp(note->hash, s_image->template_hash, sizeof(s_image->template_hash)) != 0) {
             /* The device refuses a mismatched DAL anyway; refusing here keeps the
              * failure at "we did not write" instead of a half-transfer. */
-            mb_ble_fail("E2", "DAL hash differs from our image: refusing to write "
-                              "(the board needs one USB bootstrap flash first)");
+            mb_ble_fail("E2",
+                        "DAL hash differs from our image: refusing to write "
+                        "(the board needs one USB bootstrap flash first)",
+                        "this micro:bit needs a fresh start");
             return;
         }
         ESP_LOGI(TAG, "DAL matches our template hash");
@@ -361,8 +403,10 @@ static void mb_ble_region_answered(const mb_flash_notify_t *note)
              note->hash[6], note->hash[7], holds_ours ? "holds" : "differs from");
 
     if (s_await_verify) {
+        mb_ble_emit(MB_EVENT_VERIFYING, NULL, 0, 0);
         if (!holds_ours) {
-            mb_ble_fail("E3", "region 2 does not hold the program after the transfer");
+            mb_ble_fail("E3", "region 2 does not hold the program after the transfer",
+                    "the program did not arrive intact");
             return;
         }
         mb_ble_cycle_verified("after the transfer");
@@ -377,10 +421,12 @@ static void mb_ble_region_answered(const mb_flash_notify_t *note)
     ESP_LOGI(TAG, "cycle %u/%u: streaming %u blocks from 0x%05X",
              (unsigned)(s_cycle + 1), (unsigned)CONFIG_MB_BLE_POC_CYCLES,
              (unsigned)s_image->block_count, s_image->region2_start);
-    mb_ble_status("F");
+    mb_ble_emit(MB_EVENT_FLASH_PROGRESS, NULL, 0,
+                (uint16_t)s_image->block_count);
     s_phase = MB_PHASE_STREAM;
     s_block = 0;
     s_packet = 0;
+    s_ack_packets = 0;
     mb_ble_send_block(0);
 }
 
@@ -396,13 +442,26 @@ static void mb_ble_handle_notify(const struct os_mbuf *om)
         return;
     }
 
+    /* Every notification is logged while the transfer path is being proven: a
+     * silent device and a device answering something unexpected look identical
+     * otherwise, and the stall has no other observer. */
+    if (s_phase == MB_PHASE_STREAM) {
+        ESP_LOGI(TAG, "notify %u bytes: %02X %02X %02X %02X", (unsigned)copied,
+                 copied > 0 ? buf[0] : 0, copied > 1 ? buf[1] : 0,
+                 copied > 2 ? buf[2] : 0, copied > 3 ? buf[3] : 0);
+    }
+
     mb_flash_notify_t note;
     switch (mb_flash_parse_notify(buf, copied, &note)) {
     case MB_FLASH_NOTIFY_WRITE_ACK:
         if (s_phase != MB_PHASE_STREAM) {
             return;
         }
+        /* One 01 FF per 4-packet block, not per packet: advance on every ack. */
+        s_ack_packets++;
         s_block++;
+        mb_ble_emit(MB_EVENT_FLASH_PROGRESS, NULL, (uint16_t)s_block,
+                    (uint16_t)s_image->block_count);
         if (s_block < s_image->block_count) {
             if ((s_block % 16u) == 0) {
                 ESP_LOGI(TAG, "flashing %u/%u blocks", (unsigned)s_block,
@@ -430,7 +489,8 @@ static void mb_ble_handle_notify(const struct os_mbuf *om)
         ESP_LOGW(TAG, "device reported out-of-order; skipping to block %u",
                  (unsigned)s_block);
         if (s_resyncs > 4 || s_block >= s_image->block_count) {
-            mb_ble_fail("E3", "transfer abandoned after too many resyncs");
+            mb_ble_fail("E3", "transfer abandoned after too many resyncs",
+                    "the micro:bit stopped answering");
             return;
         }
         /* The device set its counter to the next block boundary; match it. */
@@ -446,8 +506,12 @@ static void mb_ble_handle_notify(const struct os_mbuf *om)
         ESP_LOGI(TAG, "STATUS pfs_version=%u mode=%u (%s)", note.pfs_version, note.mode,
                  note.mode == 1 ? "application" : "pairing");
         s_round++;
-        ESP_LOGI(TAG, "round %u complete, disconnecting", s_round);
-        ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        /* The probe answered: link and service are good. Clear the latch and carry
+         * on with the transfer on this same link, instead of hanging up and
+         * probing again for ever (that loop skipped every write). */
+        s_flash_done = false;
+        s_phase = MB_PHASE_REGION_DAL;
+        mb_ble_send_region_info(MB_FLASH_REGION_DAL);
         return;
 
     default:
@@ -486,6 +550,7 @@ static int mb_ble_on_cccd_write(uint16_t conn_handle, const struct ble_gatt_erro
     if (!s_flash_done) {
         /* Gate G3: ask what the device already holds before writing anything. */
         ESP_LOGI(TAG, "subscribed; reading region 1 hash before any write");
+        mb_ble_emit(MB_EVENT_VERIFYING, NULL, 0, 0);
         s_phase = MB_PHASE_REGION_DAL;
         mb_ble_send_region_info(MB_FLASH_REGION_DAL);
         return 0;
@@ -570,6 +635,88 @@ static int mb_ble_on_chr_disc(uint16_t conn_handle, const struct ble_gatt_error 
     }
 }
 
+static unsigned s_svc_count;
+
+static int mb_ble_on_all_svcs(uint16_t conn_handle, const struct ble_gatt_error *error,
+                              const struct ble_gatt_svc *service, void *arg)
+{
+    (void)arg;
+    if (error->status == 0 && service != NULL) {
+        s_svc_count++;
+        char frag[10];
+        if (service->uuid.u.type == BLE_UUID_TYPE_128) {
+            uint32_t w = ((uint32_t)service->uuid.u128.value[15] << 24) |
+                         ((uint32_t)service->uuid.u128.value[14] << 16) |
+                         ((uint32_t)service->uuid.u128.value[13] << 8) |
+                         (uint32_t)service->uuid.u128.value[12];
+            snprintf(frag, sizeof(frag), " %08lx", (unsigned long)w);
+        } else {
+            snprintf(frag, sizeof(frag), " %04x", service->uuid.u16.value);
+        }
+        if (strlen(s_sv) + strlen(frag) < sizeof(s_sv)) {
+            strcat(s_sv, frag);
+        }
+        return 0;
+    }
+    if (error->status == BLE_HS_EDONE) {
+        static char note[48];
+        snprintf(note, sizeof(note), "svcs=%u%s", s_svc_count, s_sv);
+        mb_ble_emit(MB_EVENT_AWAIT_MICROBIT, note, 0, 0);
+        ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+    }
+    return 0;
+}
+
+static void mb_ble_start_disc(void *arg);
+
+static int mb_ble_on_all_svcs2(uint16_t conn_handle, const struct ble_gatt_error *error,
+                               const struct ble_gatt_svc *service, void *arg)
+{
+    (void)arg;
+    if (error->status == 0 && service != NULL) {
+        s_svc_count++;
+        /* Show the service so a mismatch is visible, not inferred. */
+        {
+            const uint8_t *b = service->uuid.u128.value;
+            static char un[24];
+            snprintf(un, sizeof(un), "u%02x%02x.%02x%02x", b[0], b[1], b[14], b[15]);
+            mb_ble_emit(MB_EVENT_AWAIT_MICROBIT, un, 0, 0);
+        }
+        if (service->uuid.u.type == BLE_UUID_TYPE_128 &&
+            memcmp(service->uuid.u128.value, k_partial_flash_svc.value, 16) == 0) {
+            s_pfs_found = true;
+            s_svc_start_handle = service->start_handle;
+            s_svc_end_handle = service->end_handle;
+        }
+        return 0;
+    }
+    if (error->status == BLE_HS_EDONE) {
+        if (s_pfs_found) {
+            if (ble_gattc_disc_all_chrs(conn_handle, s_svc_start_handle, s_svc_end_handle, mb_ble_on_chr_disc,
+                                        NULL) != 0) {
+                ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            }
+            return 0;
+        }
+        static char note[48];
+        snprintf(note, sizeof(note), "svcs=%u%s", s_svc_count, s_sv);
+        mb_ble_emit(MB_EVENT_AWAIT_MICROBIT, note, 0, 0);
+        ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+    }
+    return 0;
+}
+
+static void mb_ble_start_disc(void *arg)
+{
+    (void)arg;
+    s_svc_count = 0;
+    s_pfs_found = false;
+    s_svc_end_handle = 0;
+    if (ble_gattc_disc_all_svcs(s_conn_handle, mb_ble_on_all_svcs2, NULL) != 0) {
+        ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+    }
+}
+
 static int mb_ble_on_svc_disc(uint16_t conn_handle, const struct ble_gatt_error *error,
                               const struct ble_gatt_svc *service, void *arg)
 {
@@ -585,11 +732,14 @@ static int mb_ble_on_svc_disc(uint16_t conn_handle, const struct ble_gatt_error 
         return 0;
     case BLE_HS_EDONE:
         if (s_svc_end_handle == 0) {
-            ESP_LOGE(TAG, "partial-flash service not found on the peer");
-            ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            ESP_LOGE(TAG, "partial-flash service not found; enumerating what is there");
+            s_svc_count = 0;
+            if (ble_gattc_disc_all_svcs(conn_handle, mb_ble_on_all_svcs, NULL) != 0) {
+                ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            }
             return 0;
         }
-        if (ble_gattc_disc_all_chrs(conn_handle, 1, s_svc_end_handle, mb_ble_on_chr_disc,
+        if (ble_gattc_disc_all_chrs(conn_handle, s_svc_start_handle, s_svc_end_handle, mb_ble_on_chr_disc,
                                     NULL) != 0) {
             ESP_LOGE(TAG, "characteristic discovery failed to start");
             ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
@@ -609,6 +759,18 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
     switch (event->type) {
     case BLE_GAP_EVENT_DISC: {
         struct ble_hs_adv_fields fields;
+        s_scan_reports++;
+        if (ble_hs_adv_parse_fields(&fields, event->disc.data, event->disc.length_data) == 0 &&
+            fields.name != NULL && fields.name_len > 0) {
+            size_t n = fields.name_len < sizeof(s_last_name) - 1 ? fields.name_len : sizeof(s_last_name) - 1;
+            memcpy(s_last_name, fields.name, n);
+            s_last_name[n] = '\0';
+        }
+        if ((s_scan_reports % 5u) == 0u) {
+            static char note[96];
+            snprintf(note, sizeof(note), "s=%d n=%u%s", s_last_status, (unsigned)s_scan_reports, s_sv);
+            mb_ble_emit(MB_EVENT_AWAIT_MICROBIT, note, 0, 0);
+        }
         if (ble_hs_adv_parse_fields(&fields, event->disc.data, event->disc.length_data) != 0) {
             return 0;
         }
@@ -616,31 +778,39 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
             memcmp(fields.name, k_name_prefix, sizeof(k_name_prefix) - 1) != 0) {
             return 0;
         }
+        if (s_connecting) {
+            return 0;
+        }
         ESP_LOGI(TAG, "found peer '%.*s'", fields.name_len, (const char *)fields.name);
-
-        /* Scanning must stop before connecting. */
-        if (ble_gap_disc_cancel() != 0) {
-            return 0;
-        }
-        if (ble_hs_id_infer_auto(0, &s_own_addr_type) != 0) {
-            ESP_LOGE(TAG, "could not infer our address type");
-            return 0;
-        }
-        const int rc = ble_gap_connect(s_own_addr_type, &event->disc.addr, MB_CONNECT_TIMEOUT_MS,
-                                       NULL, mb_ble_gap_event, NULL);
-        if (rc != 0) {
-            ESP_LOGE(TAG, "connect failed to start: rc=%d", rc);
-            mb_ble_scan();
+        s_connecting = true;
+        s_last_evt = (unsigned)event->disc.event_type;
+        s_peer_addr = event->disc.addr;
+        /* Never start a connection from inside the GAP callback: it re-enters
+         * the client state machine (see the ATT-write note below), which is the
+         * class of bug that shows up as a silent connect that never completes. */
+        if (s_connect_timer != NULL) {
+            (void)esp_timer_stop(s_connect_timer);
+            (void)esp_timer_start_once(s_connect_timer, 20000);
+        } else {
+            mb_ble_connect_now(NULL);
         }
         return 0;
     }
 
     case BLE_GAP_EVENT_CONNECT:
+        s_last_status = event->connect.status;
         if (event->connect.status != 0) {
             ESP_LOGE(TAG, "connection failed: status=%d", event->connect.status);
+            s_connecting = false;
+            {
+                static char note[24];
+                snprintf(note, sizeof(note), "cs=%d", event->connect.status);
+                mb_ble_emit(MB_EVENT_AWAIT_MICROBIT, note, 0, 0);
+            }
             mb_ble_scan();
             return 0;
         }
+        s_connecting = false;
         ESP_LOGI(TAG, "connected: conn_handle=%u mtu=%u", event->connect.conn_handle,
                  ble_att_mtu(event->connect.conn_handle));
         s_peer_seen = true;
@@ -653,10 +823,13 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
         s_block = 0;
         s_packet = 0;
         s_resyncs = 0;
-        if (ble_gattc_disc_svc_by_uuid(event->connect.conn_handle, &k_partial_flash_svc.u,
-                                       mb_ble_on_svc_disc, NULL) != 0) {
-            ESP_LOGE(TAG, "service discovery failed to start");
-            ble_gap_terminate(event->connect.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        s_svc_count = 0;
+        s_pfs_found = false;
+        if (s_disc_timer != NULL) {
+            (void)esp_timer_stop(s_disc_timer);
+            (void)esp_timer_start_once(s_disc_timer, 250000);
+        } else {
+            mb_ble_start_disc(NULL);
         }
         return 0;
 
@@ -667,6 +840,13 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_DISCONNECT:
         s_connected = false;
         ESP_LOGW(TAG, "disconnected: reason=%d", event->disconnect.reason);
+        /* A finished run (DONE, or a reported failure) must not rescan: the cycle
+         * is over until the pipeline asks for another image. Without this the
+         * board was reflashed-verified over and over on one button press. */
+        if (!s_started) {
+            ESP_LOGI(TAG, "run finished; staying idle");
+            return 0;
+        }
         /* No delay in this callback: it runs on the NimBLE host task, and
          * sleeping here stops HCI processing for the whole stack. The gap the
          * micro:bit needs after its own reset is a timer instead. */
@@ -679,7 +859,21 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
         return 0;
 
     case BLE_GAP_EVENT_DISC_COMPLETE:
-        ESP_LOGW(TAG, "scan complete without a match: reason=%d", event->disc_complete.reason);
+        /* Discovery has genuinely stopped now, so a connect can be issued. */
+        if (s_connecting) {
+            if (ble_hs_id_infer_auto(0, &s_own_addr_type) != 0) {
+                s_connecting = false;
+                mb_ble_scan_soon(200);
+                return 0;
+            }
+            const int rc = ble_gap_connect(s_own_addr_type, &s_peer_addr, MB_CONNECT_TIMEOUT_MS,
+                                           NULL, mb_ble_gap_event, NULL);
+            if (rc != 0) {
+                s_connecting = false;
+                mb_ble_scan_soon(200);
+            }
+            return 0;
+        }
         return 0;
 
     default:
@@ -687,12 +881,42 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
     }
 }
 
+/* Runs off the NimBLE host task. Cancelling discovery from inside the GAP event
+ * callback returns EBUSY, so the connect was never issued and the panel kept
+ * scanning for ever after it had already found the board. */
+static void mb_ble_connect_now(void *arg)
+{
+    (void)arg;
+    const int rc = ble_gap_disc_cancel();
+    ESP_LOGI(TAG, "connect_now: cancel rc=%d", rc);
+    if (rc != 0 || ble_hs_id_infer_auto(0, &s_own_addr_type) != 0) {
+        s_connecting = false;
+        mb_ble_scan_soon(200);
+        return;
+    }
+    const int crc = ble_gap_connect(s_own_addr_type, &s_peer_addr, MB_CONNECT_TIMEOUT_MS,
+                                    NULL, mb_ble_gap_event, NULL);
+    ESP_LOGI(TAG, "connect_now: connect rc=%d own_type=%d", crc, (int)s_own_addr_type);
+    if (crc != 0) {
+        s_connecting = false;
+        mb_ble_scan_soon(200);
+    }
+}
+
 static void mb_ble_scan(void)
 {
     mb_ble_mark_progress();
+    mb_ble_emit(MB_EVENT_AWAIT_MICROBIT, NULL, 0, 0);
     struct ble_gap_disc_params params = {0};
     params.passive = 0;
-    params.filter_duplicates = 1;
+    /* Duplicate filtering must stay OFF: the micro:bit carries its name in the
+     * scan response, not the advertising packet (its service UUID does not fit
+     * in 31 bytes). With filtering on, the controller drops the second report
+     * from the same address, so the name never reaches the host and a board that
+     * every phone can see is invisible to this scan. */
+    params.filter_duplicates = 0;
+    params.itvl = BLE_GAP_SCAN_ITVL_MS(50);
+    params.window = BLE_GAP_SCAN_ITVL_MS(50);
 
     const int rc = ble_gap_disc(s_own_addr_type, MB_SCAN_FOREVER, &params, mb_ble_gap_event, NULL);
     if (rc != 0) {
@@ -732,11 +956,20 @@ static void mb_ble_host_task(void *param)
     nimble_port_freertos_deinit();
 }
 
-static bool s_started;
 
 static void mb_ble_task(void *param)
 {
     (void)param;
+
+    if (s_ble_inited) {
+        /* The stack survives between runs. Re-initialising it fails with
+         * ESP_ERR_INVALID_STATE ("controller init failed"), which left every run
+         * after the first one stuck on CONNECTING with no scan. Just rescan. */
+        ESP_LOGI(TAG, "NimBLE already up; starting another scan");
+        mb_ble_scan_soon(0);
+        vTaskDelete(NULL);
+        return;
+    }
 
     const esp_err_t err = nimble_port_init();
     if (err != ESP_OK) {
@@ -753,23 +986,29 @@ static void mb_ble_task(void *param)
      * ble_svc_gap_device_name_set() is neither needed nor linked. */
     ble_store_config_init();
     nimble_port_freertos_init(mb_ble_host_task);
+    s_ble_inited = true;
 
     vTaskDelete(NULL);
 }
 
-esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_flash_status_fn status)
+esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_event_fn status)
 {
     if (s_started) {
-        return ESP_ERR_INVALID_STATE;
+        /* A second press while a cycle is still running must not fail the screen:
+         * the earlier cycle owns the radio, and reporting "the micro:bit could
+         * not be reached" for a duplicate request is a lie the child sees. */
+        ESP_LOGW(TAG, "cycle already running; ignoring duplicate start request");
+        return ESP_OK;
     }
     if (image == NULL || image->data == NULL || image->block_count == 0) {
         ESP_LOGE(TAG, "no image to flash: the build client must fetch one first");
         return ESP_ERR_INVALID_ARG;
     }
     s_image = image;
-    s_status = status;
+    s_event = status;
     s_cycle = 0;
     s_await_verify = false;
+    s_flash_done = false;
 
     /* NimBLE narrates every GAP/GATT procedure at INFO, which buries our own
      * lines: a single flash transfer produced ~3000 log lines of which ~40 were
@@ -783,6 +1022,7 @@ esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_flash_status_fn
     ESP_LOGI(TAG, "probe build %s %s, reset_reason=%d",
              __DATE__, __TIME__, (int)esp_reset_reason());
 
+    if (!s_res_ready) {
     s_txq = xQueueCreate(8, sizeof(mb_tx_batch_t));
     s_tx_done = xSemaphoreCreateBinary();
     if (s_txq == NULL || s_tx_done == NULL) {
@@ -797,6 +1037,20 @@ esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_flash_status_fn
         ESP_LOGW(TAG, "no timer for the inter-cycle gap; scans stay immediate");
         s_scan_timer = NULL;
     }
+    const esp_timer_create_args_t connect_args = {
+        .callback = mb_ble_connect_now,
+        .name = "mb_ble_conn",
+    };
+    const esp_timer_create_args_t disc_args = {
+        .callback = mb_ble_start_disc,
+        .name = "mb_ble_disc",
+    };
+    if (esp_timer_create(&disc_args, &s_disc_timer) != ESP_OK) {
+        s_disc_timer = NULL;
+    }
+    if (esp_timer_create(&connect_args, &s_connect_timer) != ESP_OK) {
+        s_connect_timer = NULL;
+    }
     if (xTaskCreate(mb_ble_tx_task, "mb_ble_tx", 4096, NULL, 4, NULL) != pdPASS) {
         ESP_LOGE(TAG, "could not start the tx task");
         return ESP_ERR_NO_MEM;
@@ -804,6 +1058,8 @@ esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_flash_status_fn
     if (xTaskCreate(mb_ble_watch_task, "mb_ble_wd", 3072, NULL, 2, NULL) != pdPASS) {
         ESP_LOGE(TAG, "could not start the stall detector");
         return ESP_ERR_NO_MEM;
+    }
+    s_res_ready = true;
     }
 
     /* The host needs its own stack; the caller's task is the GSP/UI owner and
@@ -813,6 +1069,10 @@ esp_err_t mb_ble_central_start(const mb_flash_image_t *image, mb_flash_status_fn
         ESP_LOGE(TAG, "could not create the BLE task");
         return ESP_ERR_NO_MEM;
     }
+    s_scan_reports = 0;
+    s_connecting = false;
+    s_last_name[0] = '-';
+    s_last_name[1] = '\0';
     s_started = true;
     return ESP_OK;
 }

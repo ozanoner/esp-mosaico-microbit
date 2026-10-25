@@ -17,12 +17,21 @@ only for code changes with an identical full partition table and resources.
 
 Application components:
 
-- `components/app_hello`: portable UI behavior and private controller state.
+- `components/app_studio`: eight-state controller and the studio scene. Two
+  columns: messages on the left, the bear on the right; five-segment flash
+  progress; trophy clip on DONE. Its README carries the state table.
+- `components/mb_event`: header-only `mb_event_t` contract that `mb_voice`,
+  `mb_build_client` and `mb_ble_central` report through, so no pipeline
+  component depends on the UI.
 - `components/app_display`: BSP-to-GSP display and optional touch policy.
 - `main`: device startup and dependency composition only.
-- `components/app_hello/host`: desktop adapter and its separate CMake build,
+- `components/app_studio/host`: desktop adapter and its separate CMake build,
   reusing the same controller and public header; excluded from the ESP32 build.
-- `components/app_hello/ui/main.json`: authored scene; generated bindings and bundles stay in the build.
+  `STUDIO_SIM_STATE=<IDLE|LISTENING|BUILDING|AWAIT_MICROBIT|FLASHING|VERIFYING|DONE|FAILED>`
+  renders one exact screen headlessly.
+- `components/app_studio/ui/main.json`: authored scene; generated bindings and
+  bundles stay in the build. `tmp/build_scene.py` regenerates it from the hello
+  chrome in git, with explicit parent remapping.
 
 `project sim` discovers a unique scene under `components/*/ui/main.json` (or the
 older root `ui/main.json`). With multiple scenes, select one using `--scene PATH`,
@@ -51,3 +60,33 @@ and setup instructions live in `tools/quality/`. See its README to enable hooks.
 The `tools/quality/policy.json` prefix rule checks local application component names.
 Architecture and API semantics also require code review; formatter/static-analysis
 success alone does not establish those contracts.
+
+## Bench configuration is not in the repo
+
+`CONFIG_MB_WIFI_SSID`, `CONFIG_MB_WIFI_PASS` and `CONFIG_MB_BUILD_SERVICE_URL`
+live in the **generated** `build/sdkconfig`, never in the tracked defaults: the
+first two are secrets, the last is bench-dependent. A build that skips this step
+compiles with an empty SSID and a `127.0.0.1` service URL, so the panel reports
+"cannot reach the build box" while the service is perfectly healthy. Inject them
+before building, then rebuild so the values are compiled in.
+
+## Testing before hardware
+
+`tools/preflight/preflight.sh` is the gate: nothing gets installed on a panel
+until it passes. It needs no board, no microphone and no button.
+
+| Step | Catches |
+|---|---|
+| state machine (host, 15 cases) | wrong transitions, silent wiring, stale events repainting a finished screen, unmapped failure sentences |
+| text fit | any string that would clip its column, measured with the real TTF |
+| scene budget | a scene whose startup decode could trip the watchdog (animation peak, bundle size) |
+| bench configuration | an empty SSID or a `127.0.0.1` service URL — the build that says "cannot reach the build box" |
+| build service (audio) | ASR → LLM → `mkc` → region-2 bytes, replayed with fixtures instead of a person speaking |
+
+Audio fixtures are generated once with `piper` and committed under
+`tools/preflight/fixtures/` (`command.wav`, `short.wav`, `silence.wav`).
+
+For a run with nobody present, configure `CONFIG_MB_VOICE_BENCH_WAV=y`: the firmware
+then posts `components/mb_voice/bench/command.wav` through the real pipeline about
+5 s after boot, so `LISTENING → … → DONE` can be captured from `iris screenshot`
+without a button press. Never enable it in a shipped build.

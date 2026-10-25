@@ -10,6 +10,7 @@
 // that made mb_voice's first version see an empty reply (mb_voice.c:77-104).
 
 #include "mb_build_client.h"
+#include "mb_voice.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,14 +46,18 @@ typedef struct {
 } reply_t;
 
 static mb_flash_image_t s_image;
-static mb_flash_status_fn s_status;
+static mb_event_fn s_event;
 static mb_build_image_fn s_on_image;
 static uint8_t *s_bytes; /* PSRAM; kept for the life of the boot */
+static bool s_running;
+static bool s_started;
 
-static void report(const char *text)
+static void report(mb_event_kind_t kind, const char *detail)
 {
-    if (s_status != NULL) {
-        s_status(text);
+    if (s_event != NULL) {
+        const mb_event_t event = {.kind = kind, .detail = detail,
+                                  .progress_done = 0, .progress_total = 0};
+        s_event(&event);
     }
 }
 
@@ -181,8 +186,9 @@ static esp_err_t fetch(mb_flash_image_t *out)
     /* EMBED_TXTFILES appends a NUL, so the symbol range is one longer than the
      * source. Sending that byte makes mkc fail with "Invalid character" on the
      * line after the last one — measured on hardware, gate G4. */
-    const size_t src_capacity = (size_t)(k_payload_end - k_payload_start);
-    const size_t src_len = strnlen((const char *)k_payload_start, src_capacity);
+    const char *spoken = mb_voice_last_source();
+    const char *payload = (spoken != NULL && spoken[0] != '\0') ? spoken : (const char *)k_payload_start;
+    const size_t src_len = strlen(payload);
     const size_t body_cap = src_len * 2u + 64u;
     char *body = heap_caps_malloc(body_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (body == NULL) {
@@ -191,7 +197,7 @@ static esp_err_t fetch(mb_flash_image_t *out)
     }
 
     const size_t prefix = (size_t)snprintf(body, body_cap, "{\"source\":\"");
-    const size_t escaped = json_escape((const char *)k_payload_start, src_len, body + prefix,
+    const size_t escaped = json_escape(payload, src_len, body + prefix,
                                        body_cap - prefix - 8u);
     if (escaped == 0) {
         ESP_LOGE(TAG, "the payload does not fit the escaped body buffer");
@@ -286,17 +292,17 @@ static void build_task(void *arg)
 {
     (void)arg;
 
-    /* The panel says "building" from the moment the fetch starts: a 40 s
-     * compile with a blank screen is indistinguishable from a hung app. */
-    report("b");
-
+    /* The panel already says BUILDING: voice reports it when the request goes
+     * out, which is where the ASR, LLM and compile actually happen. */
     if (wait_for_ip() != ESP_OK) {
-        report("E1");
+        report(MB_EVENT_FAILED, "the build box is not answering");
+        s_running = false;
         vTaskDelete(NULL);
         return;
     }
     if (fetch(&s_image) != ESP_OK) {
-        report("E1");
+        report(MB_EVENT_FAILED, "the build box is not answering");
+        s_running = false;
         vTaskDelete(NULL);
         return;
     }
@@ -311,23 +317,35 @@ static void build_task(void *arg)
              s_image.program_hash[4], s_image.program_hash[5], s_image.program_hash[6],
              s_image.program_hash[7]);
 
+    report(MB_EVENT_IMAGE_READY, NULL);
     if (s_on_image != NULL) {
         s_on_image(&s_image);
     }
+    s_running = false;
     vTaskDelete(NULL);
 }
 
-esp_err_t mb_build_client_start(mb_flash_status_fn status, mb_build_image_fn on_image)
+esp_err_t mb_build_client_start(mb_event_fn status, mb_build_image_fn on_image)
 {
-    if (s_bytes != NULL) {
+    if (s_started) {
         return ESP_ERR_INVALID_STATE;
     }
-    s_status = status;
+    s_started = true;
+    s_event = status;
     s_on_image = on_image;
 
-    ESP_LOGI(TAG, "fetching one image from %s", CONFIG_MB_BUILD_SERVICE_URL);
+    ESP_LOGI(TAG, "build client ready, service %s", CONFIG_MB_BUILD_SERVICE_URL);
+    return ESP_OK;
+}
+
+esp_err_t mb_build_client_request(void)
+{
+    if (s_running) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_running = true;
     if (xTaskCreate(build_task, "mb_build", 8192, NULL, 4, NULL) != pdPASS) {
-        ESP_LOGE(TAG, "could not start the fetch task");
+        s_running = false;
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;

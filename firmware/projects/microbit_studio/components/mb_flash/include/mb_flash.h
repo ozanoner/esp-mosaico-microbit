@@ -116,8 +116,6 @@ typedef struct {
 } mb_flash_image_t;
 
 /** Short, screen-sized status token ("F", "OK", "E2"); called from any task. */
-typedef void (*mb_flash_status_fn)(const char *text);
-
 #ifdef __cplusplus
 }
 #endif

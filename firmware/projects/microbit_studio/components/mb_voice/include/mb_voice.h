@@ -2,6 +2,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include "mb_event.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,7 +16,13 @@ extern "C" {
  *
  * Failure is non-fatal by design: the UI and Recovery keep running without it.
  */
-esp_err_t mb_voice_start(void);
+/* Called once a spoken request has produced a program, so the caller can
+ * fetch the image. Runs on the recording task. */
+typedef void (*mb_voice_done_fn)(void);
+
+const char *mb_voice_last_source(void);
+
+esp_err_t mb_voice_start(mb_event_fn status, mb_voice_done_fn on_captured);
 
 #ifdef __cplusplus
 }

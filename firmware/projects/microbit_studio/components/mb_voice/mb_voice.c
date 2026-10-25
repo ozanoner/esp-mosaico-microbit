@@ -40,6 +40,8 @@ static uint8_t *s_wav;          /* PSRAM: header + PCM, header written on stop *
 static size_t s_pcm_len;
 static volatile bool s_recording;
 static SemaphoreHandle_t s_pressed;
+static mb_event_fn s_event;
+static mb_voice_done_fn s_done;
 static esp_codec_dev_handle_t s_mic;
 
 static void put_le32(uint8_t *p, uint32_t v)
@@ -103,8 +105,48 @@ static esp_err_t on_http_event(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
+static char s_source[2048];
+
+/* The service answers with the program it compiled from the speech. That source
+ * is the whole point of the pipeline: without it the build client re-sends the
+ * embedded hello.ts and the child gets the same heart every time (issue #16). */
+static void capture_source(const char *json)
+{
+    const char *p = strstr(json, "\"source\":\"");
+    if (p == NULL) {
+        s_source[0] = '\0';
+        return;
+    }
+    p += 10;
+    size_t o = 0;
+    while (*p != '\0' && *p != '"' && o + 1u < sizeof(s_source)) {
+        if (*p == '\\' && p[1] != '\0') {
+            ++p;
+            char c = *p;
+            if (c == 'n') c = '\n';
+            else if (c == 't') c = '\t';
+            else if (c == 'r') c = '\r';
+            else if (c == 'u') { p += 4; continue; }
+            s_source[o++] = c;
+            ++p;
+            continue;
+        }
+        s_source[o++] = *p++;
+    }
+    s_source[o] = '\0';
+    ESP_LOGI(TAG, "the speech built a %u-byte program", (unsigned)o);
+}
+
+const char *mb_voice_last_source(void)
+{
+    return s_source;
+}
+
 static void log_reply(int status, const reply_t *reply)
 {
+    if (status == 200 && reply != NULL && reply->len > 0) {
+        capture_source(reply->buf);
+    }
     if (reply == NULL || reply->len == 0) {
         ESP_LOGE(TAG, "service returned %d with an empty body", status);
         return;
@@ -121,8 +163,45 @@ static void log_reply(int status, const reply_t *reply)
     }
 }
 
+static void emit(mb_event_kind_t kind, const char *detail)
+{
+    if (s_event != NULL) {
+        const mb_event_t event = {.kind = kind, .detail = detail};
+        s_event(&event);
+    }
+}
+
+/* A press can land before the station has an address, and the POST would then
+ * fail instantly — which used to be reported as "I could not hear that". Wait for
+ * the address, and say what actually went wrong. */
+static bool wait_for_ip(int timeout_s)
+{
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta == NULL) {
+        return false;
+    }
+    for (int waited = 0; waited < timeout_s * 4; ++waited) {
+        esp_netif_ip_info_t ip;
+        if (esp_netif_get_ip_info(sta, &ip) == ESP_OK && ip.ip.addr != 0) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(250));
+    }
+    return false;
+}
+
 static void post_wav(const uint8_t *wav, size_t len)
 {
+    if (!wait_for_ip(CONFIG_MB_VOICE_IP_WAIT_S)) {
+        ESP_LOGE(TAG, "no address after %d s; not sending", CONFIG_MB_VOICE_IP_WAIT_S);
+        emit(MB_EVENT_FAILED, "I cannot reach the build box");
+        return;
+    }
+
+    /* From here the service is doing ASR, LLM and the compile, which is what the
+     * panel's BUILDING screen describes. Nothing is reported before this point. */
+    emit(MB_EVENT_BUILD_STARTED, NULL);
+
     char url[192];
     snprintf(url, sizeof(url), "%s?include_hex=false", CONFIG_MB_VOICE_SERVICE_URL);
 
@@ -164,8 +243,19 @@ static void post_wav(const uint8_t *wav, size_t len)
     const esp_err_t err = esp_http_client_perform(client);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "POST failed: %s", esp_err_to_name(err));
+        emit(MB_EVENT_FAILED, "I cannot reach the build box");
     } else {
-        log_reply(esp_http_client_get_status_code(client), &reply);
+        const int status = esp_http_client_get_status_code(client);
+        log_reply(status, &reply);
+        if (status == 200) {
+            if (s_done != NULL) {
+                s_done();
+            }
+        } else {
+            /* The service answered and refused the take: that is the only case
+             * where "I could not hear that" is true. */
+            emit(MB_EVENT_FAILED, "I could not hear that");
+        }
     }
 
     esp_http_client_cleanup(client);
@@ -179,9 +269,17 @@ static void on_ai_button(void *button, void *user_data)
     const button_event_t event = iot_button_get_event((button_handle_t)button);
     if (event == BUTTON_PRESS_DOWN) {
         s_recording = true;
+        if (s_event != NULL) {
+            const mb_event_t started = {.kind = MB_EVENT_LISTENING_STARTED};
+            s_event(&started);
+        }
         xSemaphoreGive(s_pressed);
     } else if (event == BUTTON_PRESS_UP) {
         s_recording = false;
+        if (s_event != NULL) {
+            const mb_event_t stopped = {.kind = MB_EVENT_LISTENING_STOPPED};
+            s_event(&stopped);
+        }
     }
 }
 
@@ -360,7 +458,30 @@ static void wifi_task(void *arg)
     vTaskDelete(NULL);
 }
 
-esp_err_t mb_voice_start(void)
+#if CONFIG_MB_VOICE_BENCH_WAV
+/* Bench: feed a known WAV through the real pipeline, with no microphone and no
+ * button, so a full run can be captured without a person present. */
+extern const uint8_t bench_wav_start[] asm("_binary_command_wav_start");
+extern const uint8_t bench_wav_end[] asm("_binary_command_wav_end");
+
+static void bench_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(5000)); /* let the station associate */
+
+    if (s_event != NULL) {
+        mb_event_t event = {.kind = MB_EVENT_LISTENING_STARTED};
+        s_event(&event);
+        event.kind = MB_EVENT_LISTENING_STOPPED;
+        s_event(&event);
+    }
+    ESP_LOGW(TAG, "bench: posting the embedded fixture");
+    post_wav(bench_wav_start, (size_t)(bench_wav_end - bench_wav_start));
+    vTaskDelete(NULL);
+}
+#endif
+
+esp_err_t mb_voice_start(mb_event_fn status, mb_voice_done_fn on_captured)
 {
     if (s_wav != NULL) {
         return ESP_ERR_INVALID_STATE;
@@ -412,6 +533,8 @@ esp_err_t mb_voice_start(void)
         ESP_LOGW(TAG, "could not start the WiFi task");
     }
 
+    s_event = status;
+    s_done = on_captured;
     s_pressed = xSemaphoreCreateBinary();
     if (s_pressed == NULL) {
         return ESP_ERR_NO_MEM;
@@ -440,6 +563,11 @@ esp_err_t mb_voice_start(void)
     }
 #endif
 
+#if CONFIG_MB_VOICE_BENCH_WAV
+    if (xTaskCreate(bench_task, "mb_voice_bench", 8192, NULL, 4, NULL) != pdPASS) {
+        ESP_LOGW(TAG, "bench task could not start");
+    }
+#endif
     ESP_LOGI(TAG, "push-to-talk ready: hold the AI button, release to send to %s",
              CONFIG_MB_VOICE_SERVICE_URL);
     return ESP_OK;
