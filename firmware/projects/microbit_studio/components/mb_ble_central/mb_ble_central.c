@@ -291,10 +291,22 @@ static void mb_ble_send_region_info(uint8_t region)
 
 static void mb_ble_send_end_of_tx(void)
 {
-    const uint32_t last = s_image->region2_start +
-                          (s_image->block_count - 1u) * MB_FLASH_BLOCK_BYTES;
-    mb_flash_build_end_of_tx(s_tx[0], last);
-    mb_ble_enqueue(1);
+    /* END_OF_TX carries no payload (protocol doc, opcode table). Queueing it as a
+     * 20-byte packet made the DAL ignore it: no 0x02 0x00 notification ever came
+     * back, the source magic was never stripped and the board kept running the
+     * previous program even though region 2 already held the new one. */
+    const uint8_t end_of_tx = MB_FLASH_CMD_END_OF_TX;
+    int rc = ble_gattc_write_no_rsp_flat(s_conn_handle, s_chr_val_handle, &end_of_tx, 1);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "END_OF_TX failed: rc=%d", rc);
+    }
+    /* Then ask it to reboot into the application so the new program actually runs. */
+    vTaskDelay(pdMS_TO_TICKS(120));
+    const uint8_t reset[2] = { MB_FLASH_CMD_RESET, 0x01 };
+    rc = ble_gattc_write_no_rsp_flat(s_conn_handle, s_chr_val_handle, reset, sizeof(reset));
+    if (rc != 0) {
+        ESP_LOGE(TAG, "RESET failed: rc=%d", rc);
+    }
 }
 
 static void mb_ble_send_block(uint32_t index)
@@ -309,10 +321,12 @@ static void mb_ble_send_block(uint32_t index)
     mb_flash_build_block(s_tx, s_image->region2_start + offset, s_image->data + offset);
 
     for (uint32_t i = 0; i < MB_FLASH_PACKETS_PER_BLOCK; i++) {
-        /* The DAL compares data[3] with a counter that runs across the whole
-         * transfer (packetCount++) instead of restarting per block, so stamping
-         * the running value is what stops the device answering 0xAA on block 2. */
-        s_tx[i][3] = (uint8_t)(s_packet + i);
+        /* data[3] must be the packet's index within its 4-packet block: the DAL
+         * switches on it to decide which packets carry the address
+         * (MicroBitPartialFlashingService.cpp:207-221). A transfer-wide counter
+         * sends 4,5,6,7 for the second block, hits "default", stamps no address,
+         * and the device stops acknowledging after the first block. */
+        s_tx[i][3] = (uint8_t)i;
     }
 
     if (index == 0) {
