@@ -255,7 +255,10 @@ static bool accepts(app_studio_state_t state, mb_event_kind_t kind)
         return state == APP_STUDIO_AWAIT_MICROBIT || state == APP_STUDIO_FLASHING ||
                state == APP_STUDIO_VERIFYING;
     case MB_EVENT_VERIFYING:
-        return state == APP_STUDIO_FLASHING;
+        /* Reached straight from CONNECTING when the board already holds the
+         * program: nothing is written, so no FLASHING would ever be emitted and
+         * the screen would sit on "waiting for micro:bit" during a real verify. */
+        return state == APP_STUDIO_FLASHING || state == APP_STUDIO_AWAIT_MICROBIT;
     case MB_EVENT_DONE:
         return state == APP_STUDIO_FLASHING || state == APP_STUDIO_VERIFYING;
     case MB_EVENT_FAILED:

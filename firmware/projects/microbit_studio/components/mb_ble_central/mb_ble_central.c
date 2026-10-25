@@ -531,6 +531,7 @@ static int mb_ble_on_cccd_write(uint16_t conn_handle, const struct ble_gatt_erro
     if (!s_flash_done) {
         /* Gate G3: ask what the device already holds before writing anything. */
         ESP_LOGI(TAG, "subscribed; reading region 1 hash before any write");
+        mb_ble_emit(MB_EVENT_VERIFYING, NULL, 0, 0);
         s_phase = MB_PHASE_REGION_DAL;
         mb_ble_send_region_info(MB_FLASH_REGION_DAL);
         return 0;
