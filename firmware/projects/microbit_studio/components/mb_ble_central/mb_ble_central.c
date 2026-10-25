@@ -427,18 +427,23 @@ static void mb_ble_handle_notify(const struct os_mbuf *om)
         return;
     }
 
+    /* Every notification is logged while the transfer path is being proven: a
+     * silent device and a device answering something unexpected look identical
+     * otherwise, and the stall has no other observer. */
+    if (s_phase == MB_PHASE_STREAM) {
+        ESP_LOGI(TAG, "notify %u bytes: %02X %02X %02X %02X", (unsigned)copied,
+                 copied > 0 ? buf[0] : 0, copied > 1 ? buf[1] : 0,
+                 copied > 2 ? buf[2] : 0, copied > 3 ? buf[3] : 0);
+    }
+
     mb_flash_notify_t note;
     switch (mb_flash_parse_notify(buf, copied, &note)) {
     case MB_FLASH_NOTIFY_WRITE_ACK:
         if (s_phase != MB_PHASE_STREAM) {
             return;
         }
-        /* The device notifies per packet, not per 4-packet block: count packets
-         * and only advance the block once all four have been acknowledged. */
+        /* One 01 FF per 4-packet block, not per packet: advance on every ack. */
         s_ack_packets++;
-        if ((s_ack_packets % MB_FLASH_PACKETS_PER_BLOCK) != 0u) {
-            return;
-        }
         s_block++;
         mb_ble_emit(MB_EVENT_FLASH_PROGRESS, NULL, (uint16_t)s_block,
                     (uint16_t)s_image->block_count);
