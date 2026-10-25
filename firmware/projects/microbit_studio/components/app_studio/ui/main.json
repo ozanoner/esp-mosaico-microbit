@@ -85,7 +85,7 @@
       "parent": -1,
       "name": "state",
       "x": 16,
-      "y": 171,
+      "y": 96,
       "w": 288,
       "h": 26,
       "text": "IDLE",
@@ -102,7 +102,12 @@
       "parent": -1,
       "name": "line1",
       "x": 16,
-      "y": 207,
+      "y": {
+        "default": 207,
+        "min": 150,
+        "max": 320,
+        "property": "y"
+      },
       "w": 288,
       "h": 52,
       "text": "",
@@ -118,7 +123,12 @@
       "parent": -1,
       "name": "line2",
       "x": 16,
-      "y": 259,
+      "y": {
+        "default": 259,
+        "min": 202,
+        "max": 372,
+        "property": "y"
+      },
       "w": 288,
       "h": 52,
       "text": "",

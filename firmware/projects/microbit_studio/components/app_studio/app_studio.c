@@ -184,6 +184,14 @@ static void bear_bob(esp_gsp_handle_t ui, void *ctx)
     remember_error(studio, gsp_studio_bear_set_y(ui, studio->bear_y));
 }
 
+/* The message block is centred in the mid section (y 96..396, centre 246): two
+ * lines sit at 194/246, a single line at 220 so its own centre is 246. */
+static void centre_message(struct app_studio *studio, bool two_lines)
+{
+    remember_error(studio, gsp_studio_line1_set_y(studio->ui, two_lines ? 194 : 220));
+    remember_error(studio, gsp_studio_line2_set_y(studio->ui, 246));
+}
+
 static void show_screen(struct app_studio *studio, app_studio_state_t state)
 {
     const studio_screen_t *screen = &screens[state];
@@ -191,6 +199,7 @@ static void show_screen(struct app_studio *studio, app_studio_state_t state)
     remember_error(studio, gsp_studio_state_set_text(studio->ui, screen->headline));
     remember_error(studio, gsp_studio_line1_set_text(studio->ui, screen->line1));
     remember_error(studio, gsp_studio_line2_set_text(studio->ui, screen->line2));
+    centre_message(studio, screen->line2[0] != '\0');
     remember_error(studio, gsp_studio_bear_set_visible(studio->ui, screen->bear));
     remember_error(studio, gsp_studio_success_set_visible(studio->ui, screen->success));
     stop_timer(studio, &studio->bob_timer);
@@ -228,6 +237,7 @@ static void show_ritual(esp_gsp_handle_t ui, void *ctx)
     }
     remember_error(studio, gsp_studio_line1_set_text(ui, RITUAL_LINE1));
     remember_error(studio, gsp_studio_line2_set_text(ui, RITUAL_LINE2));
+    centre_message(studio, true);
 }
 
 static bool is_terminal(app_studio_state_t state)
@@ -279,6 +289,8 @@ static void go_to(struct app_studio *studio, app_studio_state_t state,
                                   studio->ui, lines != NULL ? lines->line1 : failure));
         remember_error(studio, gsp_studio_line2_set_text(
                                   studio->ui, lines != NULL ? lines->line2 : ""));
+        /* an unknown sentence is one unbroken line: centre it alone */
+        centre_message(studio, lines != NULL && lines->line2[0] != '\0');
     }
     if (state == APP_STUDIO_AWAIT_MICROBIT) {
         studio->ritual_timer = esp_gsp_timer_create(studio->ui, RITUAL_AFTER_MS,

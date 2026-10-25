@@ -60,3 +60,12 @@ and setup instructions live in `tools/quality/`. See its README to enable hooks.
 The `tools/quality/policy.json` prefix rule checks local application component names.
 Architecture and API semantics also require code review; formatter/static-analysis
 success alone does not establish those contracts.
+
+## Bench configuration is not in the repo
+
+`CONFIG_MB_WIFI_SSID`, `CONFIG_MB_WIFI_PASS` and `CONFIG_MB_BUILD_SERVICE_URL`
+live in the **generated** `build/sdkconfig`, never in the tracked defaults: the
+first two are secrets, the last is bench-dependent. A build that skips this step
+compiles with an empty SSID and a `127.0.0.1` service URL, so the panel reports
+"cannot reach the build box" while the service is perfectly healthy. Inject them
+before building, then rebuild so the values are compiled in.
