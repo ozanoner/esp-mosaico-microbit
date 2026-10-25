@@ -59,6 +59,13 @@ esp_gsp_err_t gsp_studio_line2_set_text(esp_gsp_handle_t gsp, const char *text)
     return ESP_GSP_OK;
 }
 
+esp_gsp_err_t gsp_studio_hint_set_text(esp_gsp_handle_t gsp, const char *text)
+{
+    (void)gsp;
+    copy(panel.hint, sizeof(panel.hint), text);
+    return ESP_GSP_OK;
+}
+
 esp_gsp_err_t gsp_studio_line1_set_y(esp_gsp_handle_t gsp, int32_t y)
 {
     (void)gsp;

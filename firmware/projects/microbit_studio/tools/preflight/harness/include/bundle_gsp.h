@@ -9,6 +9,7 @@ extern "C" {
 
 esp_gsp_err_t gsp_studio_state_set_text(esp_gsp_handle_t gsp, const char *text);
 esp_gsp_err_t gsp_studio_line1_set_text(esp_gsp_handle_t gsp, const char *text);
+esp_gsp_err_t gsp_studio_hint_set_text(esp_gsp_handle_t, const char *);
 esp_gsp_err_t gsp_studio_line2_set_text(esp_gsp_handle_t gsp, const char *text);
 esp_gsp_err_t gsp_studio_line1_set_y(esp_gsp_handle_t gsp, int32_t y);
 esp_gsp_err_t gsp_studio_line2_set_y(esp_gsp_handle_t gsp, int32_t y);

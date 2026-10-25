@@ -12,6 +12,7 @@ typedef struct {
     char state[64];
     char line1[128];
     char line2[128];
+    char hint[64];
     int32_t line1_y;
     int32_t line2_y;
     int32_t bear_y;

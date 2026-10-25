@@ -9,3 +9,6 @@ CONFIG_ESP_IRIS_HEALTH_TIMEOUT_MS=45000
 # (gspc report for this scene), so the automatic budget must be able to grow
 # past the 64 KiB default floor without relying on late eviction.
 CONFIG_ESP_GSP_IMAGE_CACHE_AUTO_MIN_BYTES=65536
+CONFIG_ESP_GSP_RENDER_TASK_STACK_PSRAM=y
+CONFIG_ESP_GSP_DECODE_TASK_STACK_PSRAM=y
+CONFIG_ESP_GSP_ANIM_FRAME_MEMORY_SPIRAM=y

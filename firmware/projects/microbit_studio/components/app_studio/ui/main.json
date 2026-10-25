@@ -140,6 +140,23 @@
       "bind_target": "text"
     },
     {
+      "type": "label",
+      "parent": -1,
+      "name": "hint",
+      "x": 16,
+      "y": 311,
+      "w": 288,
+      "h": 26,
+      "text": "",
+      "font_size": 20,
+      "font": "fonts/Fredoka-Medium.ttf",
+      "fg_color": "#6B665E",
+      "text_align": "center",
+      "font_charset": "()abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :.+-_/",
+      "bind": "hint",
+      "bind_target": "text"
+    },
+    {
       "type": "image",
       "parent": -1,
       "name": "success",
