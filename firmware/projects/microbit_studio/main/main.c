@@ -14,6 +14,8 @@
 #include "nvs_flash.h"
 #include "ui_bundle.h"
 
+esp_err_t mb_debug_start(app_studio_handle_t studio, void (*sink)(const mb_event_t *));
+
 static const char *TAG = "microbit_studio";
 
 /* The composition root retains owned handles, never controller internals. */
@@ -89,6 +91,7 @@ void app_main(void)
         ESP_LOGE(TAG, "studio UI unavailable (0x%x); Recovery RPC remains active", studio_err);
         return;
     }
+    mb_debug_start(application.studio, on_pipeline_event);
     ESP_LOGI(TAG, "studio UI ready, state %s",
              app_studio_state_name(APP_STUDIO_IDLE));
 

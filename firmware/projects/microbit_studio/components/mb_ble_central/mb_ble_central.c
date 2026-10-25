@@ -57,6 +57,7 @@ static uint16_t s_round;             /* completed probe rounds, for the log */
 static bool s_connected;             /* a link is up; read by the tx task */
 static volatile uint32_t s_last_progress_ms; /* last time the BLE path moved */
 static uint16_t s_chr_val_handle;    /* discovered value handle, 0 = none */
+static uint16_t s_svc_start_handle;
 static uint16_t s_svc_end_handle;    /* end of the partial-flash service */
 static bool s_cccd_pending;          /* subscribe write started for this round */
 
@@ -83,7 +84,8 @@ static bool s_flash_done;   /* stop flashing, fall back to the STATUS probe */
 static bool s_started;            /* a cycle is in flight; cleared when it ends */
 static unsigned s_scan_reports;   /* diagnostic: reports heard this cycle */
 static char s_last_name[20] = "-"; /* diagnostic: last advertised name heard */
-static int s_last_status = -1;     /* diagnostic: last connect status seen */
+static int s_last_status = -1;
+static char s_sv[40] = "";     /* diagnostic: last connect status seen */
 
 /* ---- gate G4: the cycle driver -----------------------------------------
  *
@@ -612,11 +614,24 @@ static int mb_ble_on_all_svcs(uint16_t conn_handle, const struct ble_gatt_error 
     (void)arg;
     if (error->status == 0 && service != NULL) {
         s_svc_count++;
+        char frag[10];
+        if (service->uuid.u.type == BLE_UUID_TYPE_128) {
+            uint32_t w = ((uint32_t)service->uuid.u128.value[15] << 24) |
+                         ((uint32_t)service->uuid.u128.value[14] << 16) |
+                         ((uint32_t)service->uuid.u128.value[13] << 8) |
+                         (uint32_t)service->uuid.u128.value[12];
+            snprintf(frag, sizeof(frag), " %08lx", (unsigned long)w);
+        } else {
+            snprintf(frag, sizeof(frag), " %04x", service->uuid.u16.value);
+        }
+        if (strlen(s_sv) + strlen(frag) < sizeof(s_sv)) {
+            strcat(s_sv, frag);
+        }
         return 0;
     }
     if (error->status == BLE_HS_EDONE) {
-        static char note[24];
-        snprintf(note, sizeof(note), "svcs=%u", s_svc_count);
+        static char note[48];
+        snprintf(note, sizeof(note), "svcs=%u%s", s_svc_count, s_sv);
         mb_ble_emit(MB_EVENT_AWAIT_MICROBIT, note, 0, 0);
         ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
     }
@@ -631,22 +646,31 @@ static int mb_ble_on_all_svcs2(uint16_t conn_handle, const struct ble_gatt_error
     (void)arg;
     if (error->status == 0 && service != NULL) {
         s_svc_count++;
-        if (ble_uuid_cmp(&service->uuid.u, &k_partial_flash_svc.u) == 0) {
+        /* Show the service so a mismatch is visible, not inferred. */
+        {
+            const uint8_t *b = service->uuid.u128.value;
+            static char un[24];
+            snprintf(un, sizeof(un), "u%02x%02x.%02x%02x", b[0], b[1], b[14], b[15]);
+            mb_ble_emit(MB_EVENT_AWAIT_MICROBIT, un, 0, 0);
+        }
+        if (service->uuid.u.type == BLE_UUID_TYPE_128 &&
+            memcmp(service->uuid.u128.value, k_partial_flash_svc.value, 16) == 0) {
             s_pfs_found = true;
+            s_svc_start_handle = service->start_handle;
             s_svc_end_handle = service->end_handle;
         }
         return 0;
     }
     if (error->status == BLE_HS_EDONE) {
         if (s_pfs_found) {
-            if (ble_gattc_disc_all_chrs(conn_handle, 1, s_svc_end_handle, mb_ble_on_chr_disc,
+            if (ble_gattc_disc_all_chrs(conn_handle, s_svc_start_handle, s_svc_end_handle, mb_ble_on_chr_disc,
                                         NULL) != 0) {
                 ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
             }
             return 0;
         }
-        static char note[24];
-        snprintf(note, sizeof(note), "svcs=%u", s_svc_count);
+        static char note[48];
+        snprintf(note, sizeof(note), "svcs=%u%s", s_svc_count, s_sv);
         mb_ble_emit(MB_EVENT_AWAIT_MICROBIT, note, 0, 0);
         ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
     }
@@ -686,7 +710,7 @@ static int mb_ble_on_svc_disc(uint16_t conn_handle, const struct ble_gatt_error 
             }
             return 0;
         }
-        if (ble_gattc_disc_all_chrs(conn_handle, 1, s_svc_end_handle, mb_ble_on_chr_disc,
+        if (ble_gattc_disc_all_chrs(conn_handle, s_svc_start_handle, s_svc_end_handle, mb_ble_on_chr_disc,
                                     NULL) != 0) {
             ESP_LOGE(TAG, "characteristic discovery failed to start");
             ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
@@ -714,8 +738,8 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
             s_last_name[n] = '\0';
         }
         if ((s_scan_reports % 5u) == 0u) {
-            static char note[40];
-            snprintf(note, sizeof(note), "s=%d n=%u", s_last_status, (unsigned)s_scan_reports);
+            static char note[96];
+            snprintf(note, sizeof(note), "s=%d n=%u%s", s_last_status, (unsigned)s_scan_reports, s_sv);
             mb_ble_emit(MB_EVENT_AWAIT_MICROBIT, note, 0, 0);
         }
         if (ble_hs_adv_parse_fields(&fields, event->disc.data, event->disc.length_data) != 0) {
@@ -725,15 +749,22 @@ static int mb_ble_gap_event(struct ble_gap_event *event, void *arg)
             memcmp(fields.name, k_name_prefix, sizeof(k_name_prefix) - 1) != 0) {
             return 0;
         }
-        ESP_LOGI(TAG, "found peer '%.*s'", fields.name_len, (const char *)fields.name);
-
         if (s_connecting) {
             return 0;
         }
+        ESP_LOGI(TAG, "found peer '%.*s'", fields.name_len, (const char *)fields.name);
         s_connecting = true;
         s_last_evt = (unsigned)event->disc.event_type;
         s_peer_addr = event->disc.addr;
-        mb_ble_connect_now(NULL);
+        /* Never start a connection from inside the GAP callback: it re-enters
+         * the client state machine (see the ATT-write note below), which is the
+         * class of bug that shows up as a silent connect that never completes. */
+        if (s_connect_timer != NULL) {
+            (void)esp_timer_stop(s_connect_timer);
+            (void)esp_timer_start_once(s_connect_timer, 20000);
+        } else {
+            mb_ble_connect_now(NULL);
+        }
         return 0;
     }
 
@@ -827,6 +858,7 @@ static void mb_ble_connect_now(void *arg)
 {
     (void)arg;
     const int rc = ble_gap_disc_cancel();
+    ESP_LOGI(TAG, "connect_now: cancel rc=%d", rc);
     if (rc != 0 || ble_hs_id_infer_auto(0, &s_own_addr_type) != 0) {
         s_connecting = false;
         mb_ble_scan_soon(200);
@@ -834,6 +866,7 @@ static void mb_ble_connect_now(void *arg)
     }
     const int crc = ble_gap_connect(s_own_addr_type, &s_peer_addr, MB_CONNECT_TIMEOUT_MS,
                                     NULL, mb_ble_gap_event, NULL);
+    ESP_LOGI(TAG, "connect_now: connect rc=%d own_type=%d", crc, (int)s_own_addr_type);
     if (crc != 0) {
         s_connecting = false;
         mb_ble_scan_soon(200);
