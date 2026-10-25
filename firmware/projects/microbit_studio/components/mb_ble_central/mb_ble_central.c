@@ -321,12 +321,13 @@ static void mb_ble_send_block(uint32_t index)
     mb_flash_build_block(s_tx, s_image->region2_start + offset, s_image->data + offset);
 
     for (uint32_t i = 0; i < MB_FLASH_PACKETS_PER_BLOCK; i++) {
-        /* data[3] must be the packet's index within its 4-packet block: the DAL
-         * switches on it to decide which packets carry the address
-         * (MicroBitPartialFlashingService.cpp:207-221). A transfer-wide counter
-         * sends 4,5,6,7 for the second block, hits "default", stamps no address,
-         * and the device stops acknowledging after the first block. */
-        s_tx[i][3] = (uint8_t)i;
+        /* data[3] is a TRANSFER-WIDE packet counter, compared by the DAL against
+         * its own running packetCount (MicroBitPartialFlashingService.cpp:217-241).
+         * Stamping a per-block index makes every packet after the first block
+         * look like it came from a previous batch, and the device drops it
+         * silently (line 229) — which is exactly the stall we chased. The address
+         * split uses the device's internal blockNum, not this byte. */
+        s_tx[i][3] = (uint8_t)(s_packet + i);
     }
 
     if (index == 0) {
