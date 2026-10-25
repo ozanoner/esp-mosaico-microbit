@@ -10,6 +10,7 @@
 // that made mb_voice's first version see an empty reply (mb_voice.c:77-104).
 
 #include "mb_build_client.h"
+#include "mb_voice.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -185,8 +186,9 @@ static esp_err_t fetch(mb_flash_image_t *out)
     /* EMBED_TXTFILES appends a NUL, so the symbol range is one longer than the
      * source. Sending that byte makes mkc fail with "Invalid character" on the
      * line after the last one — measured on hardware, gate G4. */
-    const size_t src_capacity = (size_t)(k_payload_end - k_payload_start);
-    const size_t src_len = strnlen((const char *)k_payload_start, src_capacity);
+    const char *spoken = mb_voice_last_source();
+    const char *payload = (spoken != NULL && spoken[0] != '\0') ? spoken : (const char *)k_payload_start;
+    const size_t src_len = strlen(payload);
     const size_t body_cap = src_len * 2u + 64u;
     char *body = heap_caps_malloc(body_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (body == NULL) {
@@ -195,7 +197,7 @@ static esp_err_t fetch(mb_flash_image_t *out)
     }
 
     const size_t prefix = (size_t)snprintf(body, body_cap, "{\"source\":\"");
-    const size_t escaped = json_escape((const char *)k_payload_start, src_len, body + prefix,
+    const size_t escaped = json_escape(payload, src_len, body + prefix,
                                        body_cap - prefix - 8u);
     if (escaped == 0) {
         ESP_LOGE(TAG, "the payload does not fit the escaped body buffer");

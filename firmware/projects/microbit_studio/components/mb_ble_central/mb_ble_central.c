@@ -80,6 +80,7 @@ static uint16_t s_conn_handle;
 static uint32_t s_block;    /* index of the next block to send */
 static uint32_t s_packet;   /* transfer-wide packet counter, per the DAL */
 static uint32_t s_resyncs;
+static uint32_t s_ack_packets;   /* packets acknowledged in the current block */
 static bool s_flash_done;   /* stop flashing, fall back to the STATUS probe */
 static bool s_ble_inited;   /* NimBLE is initialised once per boot, never twice */
 static bool s_res_ready;    /* queue, timers and worker tasks exist */
@@ -255,30 +256,19 @@ static void mb_ble_tx_task(void *arg)
             if (!s_connected) {
                 break;
             }
-            (void)xSemaphoreTake(s_tx_done, 0);
-            s_write_error = 0;
-            const int rc = ble_gattc_write_flat(s_conn_handle, s_chr_val_handle, batch.data[i],
-                                                MB_FLASH_PACKET_BYTES, mb_ble_on_packet_write, NULL);
+            /* The data characteristic is WRITE_WITHOUT_RESPONSE (protocol doc
+             * line 12). A Write Request is rejected by the DAL with ATT 0x07 and
+             * the link drops; pace the packets here instead and let the device's
+             * 01 FF / 01 AA notifications drive progress. */
+            const int rc = ble_gattc_write_no_rsp_flat(s_conn_handle, s_chr_val_handle,
+                                                       batch.data[i], MB_FLASH_PACKET_BYTES);
             if (rc != 0) {
-                ESP_LOGE(TAG, "packet %u failed to start: rc=%d", i, rc);
+                ESP_LOGE(TAG, "packet %u failed to queue: rc=%d", i, rc);
                 mb_ble_fail("E3", "the radio refused a packet",
                     "the micro:bit stopped answering");
                 break;
             }
-            if (xSemaphoreTake(s_tx_done, pdMS_TO_TICKS(CONFIG_MB_BLE_ACK_TIMEOUT_MS)) != pdTRUE) {
-                /* Measured on hardware: the ATT response to the first packet of
-                 * a cold board arrived 300 ms *after* a 2 s deadline, and a
-                 * warm board answers each block in ~480 ms. 2 s was the bug,
-                 * not the link. */
-                mb_ble_fail("E3", "packet ack timed out",
-                    "the micro:bit stopped answering");
-                break;
-            }
-            if (s_write_error != 0) {
-                mb_ble_fail("E3", "the peer rejected a packet",
-                    "the micro:bit stopped answering");
-                break;
-            }
+            vTaskDelay(pdMS_TO_TICKS(12));
         }
     }
 }
@@ -421,6 +411,7 @@ static void mb_ble_region_answered(const mb_flash_notify_t *note)
     s_phase = MB_PHASE_STREAM;
     s_block = 0;
     s_packet = 0;
+    s_ack_packets = 0;
     mb_ble_send_block(0);
 }
 
@@ -440,6 +431,12 @@ static void mb_ble_handle_notify(const struct os_mbuf *om)
     switch (mb_flash_parse_notify(buf, copied, &note)) {
     case MB_FLASH_NOTIFY_WRITE_ACK:
         if (s_phase != MB_PHASE_STREAM) {
+            return;
+        }
+        /* The device notifies per packet, not per 4-packet block: count packets
+         * and only advance the block once all four have been acknowledged. */
+        s_ack_packets++;
+        if ((s_ack_packets % MB_FLASH_PACKETS_PER_BLOCK) != 0u) {
             return;
         }
         s_block++;

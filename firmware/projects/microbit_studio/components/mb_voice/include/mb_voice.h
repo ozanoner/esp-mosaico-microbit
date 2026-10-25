@@ -20,6 +20,8 @@ extern "C" {
  * fetch the image. Runs on the recording task. */
 typedef void (*mb_voice_done_fn)(void);
 
+const char *mb_voice_last_source(void);
+
 esp_err_t mb_voice_start(mb_event_fn status, mb_voice_done_fn on_captured);
 
 #ifdef __cplusplus

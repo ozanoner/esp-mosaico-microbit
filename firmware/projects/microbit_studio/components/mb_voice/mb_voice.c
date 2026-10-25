@@ -105,8 +105,48 @@ static esp_err_t on_http_event(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
+static char s_source[2048];
+
+/* The service answers with the program it compiled from the speech. That source
+ * is the whole point of the pipeline: without it the build client re-sends the
+ * embedded hello.ts and the child gets the same heart every time (issue #16). */
+static void capture_source(const char *json)
+{
+    const char *p = strstr(json, "\"source\":\"");
+    if (p == NULL) {
+        s_source[0] = '\0';
+        return;
+    }
+    p += 10;
+    size_t o = 0;
+    while (*p != '\0' && *p != '"' && o + 1u < sizeof(s_source)) {
+        if (*p == '\\' && p[1] != '\0') {
+            ++p;
+            char c = *p;
+            if (c == 'n') c = '\n';
+            else if (c == 't') c = '\t';
+            else if (c == 'r') c = '\r';
+            else if (c == 'u') { p += 4; continue; }
+            s_source[o++] = c;
+            ++p;
+            continue;
+        }
+        s_source[o++] = *p++;
+    }
+    s_source[o] = '\0';
+    ESP_LOGI(TAG, "the speech built a %u-byte program", (unsigned)o);
+}
+
+const char *mb_voice_last_source(void)
+{
+    return s_source;
+}
+
 static void log_reply(int status, const reply_t *reply)
 {
+    if (status == 200 && reply != NULL && reply->len > 0) {
+        capture_source(reply->buf);
+    }
     if (reply == NULL || reply->len == 0) {
         ESP_LOGE(TAG, "service returned %d with an empty body", status);
         return;
