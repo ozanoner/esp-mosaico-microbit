@@ -8,6 +8,9 @@
 
 #include "bundle_gsp.h"
 
+/* Bisect: disable the 600 ms bear bob to isolate the INT WDT (issue #7). */
+#define STUDIO_BOB_ENABLED 1
+
 /* Agreed in issue #7: the ritual prompt appears only when a board never
  * answered, the two terminal screens hold long enough to read, and the segment
  * being downloaded pulses at 500 ms. */
@@ -182,7 +185,11 @@ static void bear_bob(esp_gsp_handle_t ui, void *ctx)
     struct app_studio *studio = ctx;
     studio->bob_up = !studio->bob_up;
     studio->bear_y = studio->bob_up ? BEAR_Y_HIGH : BEAR_Y_LOW;
+#if STUDIO_BOB_ENABLED
     remember_error(studio, gsp_studio_bear_set_y(ui, studio->bear_y));
+#else
+    (void)ui;
+#endif
 }
 
 /* The message block is centred in the mid section (y 96..396, centre 246): two
