@@ -114,15 +114,11 @@ void app_main(void)
                  esp_err_to_name(build_err));
     }
 
-    /* Publish HEALTHY only now that the product's own subsystems are up.
-     * ESP-Iris never infers acceptance from Iris starting (esp_iris.h:194-202),
-     * so without this call a System Update installs and boots but is reported
-     * outcome_unknown, and with rollback enabled the bootloader has no
-     * acceptance to act on. */
-    const esp_err_t healthy_err = esp_iris_mark_healthy();
-    if (healthy_err != ESP_OK) {
-        ESP_LOGE(TAG, "could not publish HEALTHY (%s)", esp_err_to_name(healthy_err));
-    } else {
-        ESP_LOGI(TAG, "image accepted, HEALTHY published");
-    }
+    /* Acceptance is published by iris_ota_support_start()'s acceptance_task
+     * (esp_mosaico_app_recovery/iris_ota_support.c:331), exactly as the
+     * hello_world template does it -- the app never calls
+     * esp_iris_mark_healthy() itself. Adding a second acceptor here could only
+     * ever report the retained firmware's otadata state as this app's error
+     * ("could not publish HEALTHY (ESP_FAIL)" on every boot where no image is
+     * pending), which is what it did. Leave acceptance to its owner. */
 }
