@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "esp-mosaico-microbit — solution view",
+    "locale": "en",
+    "output": "docs/architecture/solution.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/ozanoner/esp-mosaico-microbit.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "69b0ec42b2ec5a5b823a6728313532d5d304f577"
+    }
+  },
+  "components": [
+    {
+      "id": "kid",
+      "type": "external",
+      "label": "Child",
+      "sublabel": "speaks, presses AI",
+      "icon": "person",
+      "pos": [30, 96],
+      "size": [116, 64],
+      "sources": [
+        { "path": "README.md", "line": 3, "end_line": 5, "label": "kid asks, box builds, BLE flashes" }
+      ]
+    },
+    {
+      "id": "mosaico",
+      "type": "backend",
+      "label": "ESP-Mosaico app",
+      "sublabel": "microbit_studio, ESP32-S31",
+      "pos": [186, 84],
+      "size": [196, 88],
+      "sources": [
+        { "path": "firmware/projects/microbit_studio/main/main.c", "line": 66, "end_line": 88, "label": "composition root: UI, studio, pipeline" },
+        { "path": "firmware/projects/microbit_studio/components/app_studio/app_studio.c", "line": 81, "end_line": 84, "label": "eight states driven by mb_event" }
+      ]
+    },
+    {
+      "id": "build",
+      "type": "backend",
+      "label": "Build service",
+      "sublabel": "/v1/speak, /v1/build",
+      "pos": [556, 84],
+      "size": [200, 88],
+      "sources": [
+        { "path": "build-service/mb_build_service/app.py", "line": 88, "end_line": 90, "label": "POST /v1/speak: audio in, image out" },
+        { "path": "build-service/mb_build_service/app.py", "line": 69, "end_line": 85, "label": "POST /v1/build?region2=true" },
+        { "path": "build-service/mb_build_service/app.py", "line": 38, "end_line": 44, "label": "GET /v1/health reports the pin" }
+      ]
+    },
+    {
+      "id": "mkc",
+      "type": "external",
+      "label": "Pinned toolchain",
+      "sublabel": "mkc 1.3.6 + editor parts",
+      "pos": [556, 244],
+      "size": [186, 72],
+      "sources": [
+        { "path": "build-service/Dockerfile", "line": 10, "end_line": 19, "label": "base digest, mkc pin, toolchain id" },
+        { "path": "build-service/Dockerfile", "line": 30, "end_line": 56, "label": "npm ci, uv sync, offline editor cache" }
+      ]
+    },
+    {
+      "id": "asr",
+      "type": "backend",
+      "label": "ASR provider",
+      "sublabel": "/audio/transcriptions",
+      "pos": [770, 244],
+      "size": [164, 64],
+      "sources": [
+        { "path": "build-service/mb_build_service/providers.py", "line": 71, "end_line": 80, "label": "OpenAI-compatible transcriber" },
+        { "path": "compose.yaml", "line": 16, "end_line": 25, "label": "local asr sidecar, not a cloud call" }
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "cloud",
+      "label": "LLM provider",
+      "sublabel": "/chat/completions",
+      "pos": [1010, 150],
+      "size": [168, 64],
+      "sources": [
+        { "path": "build-service/mb_build_service/providers.py", "line": 122, "end_line": 132, "label": "generator needs MB_LLM_API_KEY" }
+      ]
+    },
+    {
+      "id": "microbit",
+      "type": "external",
+      "label": "micro:bit v1",
+      "sublabel": "partial-flash service",
+      "pos": [186, 320],
+      "size": [196, 88],
+      "sources": [
+        { "path": "microbit/template/pxt.json", "line": 14, "end_line": 22, "label": "partial_flashing enabled in the DAL" },
+        { "path": "docs/partial-flash-protocol.md", "line": 28, "end_line": 31, "label": "REGION_INFO and 0xEE status" }
+      ]
+    },
+    {
+      "id": "host",
+      "type": "external",
+      "label": "Host CLI",
+      "sublabel": "mosaico.py",
+      "pos": [30, 320],
+      "size": [116, 72],
+      "sources": [
+        { "path": "firmware/mosaico.py", "line": 1, "end_line": 18, "label": "workspace launcher for the device CLI" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "build box — compose project",
+      "wraps": ["build", "mkc", "asr"],
+      "pad": 22
+    }
+  ],
+  "connections": [
+    { "from": "kid", "to": "mosaico", "label": "voice" },
+    { "from": "mosaico", "to": "build", "label": "WAV", "variant": "emphasis" },
+    { "from": "build", "to": "mosaico", "label": "region 2" },
+    { "from": "build", "to": "asr", "label": "transcribe" },
+    { "from": "build", "to": "llm", "label": "generate" },
+    { "from": "build", "to": "mkc", "label": "compile" },
+    { "from": "mosaico", "to": "microbit", "label": "BLE partial flash", "variant": "emphasis" },
+    { "from": "microbit", "to": "mosaico", "label": "region 2 matches" },
+    { "from": "host", "to": "mosaico", "label": "system-update" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Where the image comes from",
+      "items": [
+        "Region 2 is 0x30000-0x3BBFF; the real start comes from the DAL magic address",
+        "The device never parses Intel HEX: /v1/build?region2=true returns the bytes",
+        "The DAL hash must match the board, or the write is refused"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Reproducibility gate",
+      "items": [
+        "make verify rebuilds hello.ts and compares against microbit/golden/expected.json",
+        "templates hash 08d9ef69, program hash 8f007d00, 96 blocks at 0x37400",
+        "Runs in CI on a published release and on demand only"
+      ]
+    }
+  ]
+}

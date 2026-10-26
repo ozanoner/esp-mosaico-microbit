@@ -10,6 +10,12 @@ box, and flashes the micro:bit over **Bluetooth LE** — no cable, no editor.
                   (AI button)     → .hex + region hashes      progress UI + hash check
 ```
 
+![Solution view: the child speaks to the Mosaico, the build box turns it into an image, the image goes over BLE to the micro:bit](docs/architecture/solution.png)
+
+Every box in that picture is drawn from source, with the file and line range it came
+from recorded in the diagram's own JSON. [Interactive version][solution-html] ·
+[regenerate it](docs/architecture/README.md).
+
 Status: **PoC** — this repository currently validates the hard part of the chain
 (build a MakeCode hex with a pinned toolchain, extract the region geometry, flash
 it over BLE, verify it landed). Voice and LLM come next.
@@ -85,6 +91,7 @@ schedule, so the image bakes them in at build time and the runtime never fetches
 ## Documentation
 
 - [Architecture and contracts](docs/architecture.md)
+- [Component view](docs/architecture/components.html) — the monorepo's parts and the contracts between them ([static PNG](docs/architecture/components.png))
 - [micro:bit v1 BLE partial-flash protocol](docs/partial-flash-protocol.md)
 - [Bring-up gates](docs/bringup-gates.md)
 - [Reproducibility](docs/reproducibility.md)
@@ -98,3 +105,5 @@ needs one USB flash to bootstrap.
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
+
+[solution-html]: https://htmlpreview.github.io/?https://raw.githubusercontent.com/ozanoner/esp-mosaico-microbit/main/docs/architecture/solution.html

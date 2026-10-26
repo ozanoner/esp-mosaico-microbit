@@ -13,6 +13,11 @@ to sit between the kid's request and the micro:bit.
                                   (toolchain pinned)            GSP UI, progress, verdict
 ```
 
+The same picture, rendered and source-cited: [solution view](architecture/solution.png)
+([interactive](architecture/solution.html)) and [component view](architecture/components.png)
+([interactive](architecture/components.html)). Boxes below refer to the components in that
+second diagram; how to regenerate both is in [architecture/README.md](architecture/README.md).
+
 ## 1. Build service (`build-service/`)
 
 One HTTPS endpoint on the LAN box rather than three device-side calls. Rationale:

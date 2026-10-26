@@ -46,3 +46,9 @@ firmware/dependencies.lock
 tmp/
 # ESP-Iris Gateway state written into the project by mosaico.py
 .gateway/
+# archify run receipts: absolute paths, timestamps, machine-specific Chrome path
+docs/architecture/*.finalize.json
+docs/architecture/*.finalize-summary.json
+docs/architecture/*.browser-check.json
+docs/architecture/*.delivery.json
+docs/architecture/review-*/
