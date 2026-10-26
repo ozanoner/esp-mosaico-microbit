@@ -61,10 +61,14 @@ Components to add on top of the template:
 
 | Component | Purpose |
 |---|---|
+| `mb_voice` | push-to-talk capture, `POST /v1/speak` |
+| `mb_build_client` | `POST /v1/build?region2=true`; TLS buffers and the image in PSRAM |
 | `mb_payload` | Intel HEX → region-2 64-byte blocks (C port of `tools/hexkit`) |
-| `mb_flash` | NimBLE central + partial-flash client |
-| `build_service_client` | HTTPS to the build service, TLS buffers in PSRAM |
+| `mb_flash` | the partial-flash packet codec (`REGION_INFO`, `WRITE_DATA`, `END_OF_TX`) |
+| `mb_ble_central` | NimBLE central: scan, connect, CCCD, notify-paced writes, verify |
+| `app_display` | BSP panel and screen mirroring |
 | `app_studio` | state machine + GSP scene |
+| `mb_event` | the event type the pipeline emits |
 
 `project init` initialises an independent git repository inside
 `projects/<name>`; this monorepo tracks the application as ordinary files, so that

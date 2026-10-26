@@ -4,8 +4,10 @@ Initializes platform services, starts Recovery, loads the UI bundle, prepares th
 display, starts GSP and attaches the application controller, in that order. It
 contains no input handling, animation or drawing rules and exports no headers.
 
-Private dependencies: `app_display`, `app_hello`, Iris, Recovery, bundle loading,
-screen mirroring, NVS and logging. Shared product/platform components retain
+Private dependencies: `app_display`, `app_studio`, Iris, Recovery, bundle loading,
+screen mirroring, the pipeline components (`mb_voice`, `mb_build_client`,
+`mb_payload`, `mb_flash`, `mb_ble_central`, `mb_event`, `mb_mem_probe`), NVS and
+logging. Shared product/platform components retain
 their names. Central dependency pins/overrides live in `idf_component.yml`.
 
 ESP-IDF invokes `app_main()` once in task context; it takes no parameters and
