@@ -41,20 +41,15 @@ jobs:
         with:
           ref: ${{ steps.target.outputs.ref }}
 
-      # version.txt names the release, so it has to name the tag being published
-      # or the tree is claiming a version it is not. Bumped in the release's code
-      # commit, never in a separate stamping commit.
-      - name: version.txt names this release
+      # The version the firmware reports and the tag this release publishes are the
+      # same number, read from the one place ESP-Iris reads it: the CMake project
+      # version. The comparison and the grammar live in tools/release/version.py so
+      # the release path and the gate cannot disagree about either.
+      - name: tag names the version the firmware reports
         if: github.event_name == 'release'
         run: |
           set -euo pipefail
-          want="${{ github.event.release.tag_name }}"
-          got="$(tr -d '\r\n' < version.txt)"
-          if [ "$got" != "$want" ]; then
-            echo "::error file=version.txt::version.txt says '$got' but this release is '$want' — bump version.txt in the release's code commit"
-            exit 1
-          fi
-          echo "version.txt names this release: $got"
+          python3 tools/release/version.py check-tag "${{ github.event.release.tag_name }}"
 
       # Only the build-service image is needed. `asr` is a runtime dependency of
       # the service, not of `verify`, and its tag is local-only (never pushed),

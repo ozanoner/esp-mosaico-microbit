@@ -7,6 +7,7 @@
 #   make firmware    shell inside the ESP-IDF container (mosaico.py lives there)
 #   make firmware-hw same shell, with the board's USB ports exposed
 #   make patch-tools apply the local fix to the pinned esp-mosaico-utils tools
+#   make release     version bump, changelog and tag: make release PART=minor
 #   make test        unit tests only
 #   make down        stop everything
 
@@ -16,13 +17,16 @@ COMPOSE := docker compose
 COMPOSE_HW := $(COMPOSE) -f compose.yaml -f compose.hw.yaml
 BUILD_SERVICE := $(COMPOSE) run --rm build-service
 PAYLOAD ?= microbit/payloads/hello.ts
+# `make release PART=minor`; the default is the smallest honest bump.
+PART ?= patch
+PYTHON ?= python3
 
 # Local fix to the pinned vendor tools; see firmware/patches/README.md.
 TOOLS_DIR := firmware/submodule/esp-mosaico-utils
 TOOLS_PATCH := $(abspath firmware/patches/0001-rom-download-mode-discovery.patch)
 
 .DEFAULT_GOAL := help
-.PHONY: help verify test build up logs down firmware firmware-hw patch-tools ps clean
+.PHONY: help verify test build up logs down firmware firmware-hw patch-tools release ps clean
 
 help:
 	@grep -E '^#   make' Makefile | sed 's/^#   //'
@@ -50,6 +54,11 @@ patch-tools:
 	else \
 		git -C $(TOOLS_DIR) apply $(TOOLS_PATCH) && echo "tools patch: applied"; \
 	fi
+
+# Version, changelog and tag in one step. The tag is `v` plus the CMake project
+# version, which is the number ESP-Iris reads as the app version.
+release:
+	$(PYTHON) tools/release/version.py bump $(PART) --tag --push
 
 firmware: patch-tools
 	$(COMPOSE) up -d mosaico-idf

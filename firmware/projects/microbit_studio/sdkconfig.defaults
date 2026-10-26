@@ -64,8 +64,9 @@ CONFIG_SPIRAM_MEMTEST=n
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=20480
 CONFIG_ESP_TASK_WDT_INIT=n
 
-CONFIG_APP_PROJECT_VER_FROM_CONFIG=y
-CONFIG_APP_PROJECT_VER="1.0.0"
+# No CONFIG_APP_PROJECT_VER here on purpose: it overrides the CMake project
+# version, and the CMake version is what ESP-Iris reads as the app version. Set
+# it in `project(microbit_studio VERSION ...)` and nowhere else.
 
 CONFIG_TINYUSB_CDC_COUNT=2
 

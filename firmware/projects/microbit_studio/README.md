@@ -82,6 +82,7 @@ until it passes. It needs no board, no microphone and no button.
 | scene budget | a scene whose startup decode could trip the watchdog (animation peak, bundle size) |
 | bench configuration | an empty SSID or a `127.0.0.1` service URL — the build that says "cannot reach the build box" |
 | build service (audio) | ASR → LLM → `mkc` → region-2 bytes, replayed with fixtures instead of a person speaking |
+| application version (`WITH_BUILD=1`) | a build that reports a version other than the `project(… VERSION …)` line, or a `CONFIG_APP_PROJECT_VER` override that outranks it. This is the number ESP-Iris reads as `app_version` |
 
 Audio fixtures are generated once with `piper` and committed under
 `tools/preflight/fixtures/` (`command.wav`, `short.wav`, `silence.wav`).

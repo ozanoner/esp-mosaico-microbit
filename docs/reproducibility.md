@@ -58,22 +58,30 @@ Before a tag, in this order:
    and G4 (a generated image runs, and region 2 still matches after the reboot).
    The revision glyph on the LED matrix is a human check — nothing on the host can
    read it. See [bring-up gates](bringup-gates.md).
-2. **Bump `version.txt`** to the tag being released, in the same commit as the code
-   it names. A published release whose `version.txt` disagrees with the tag fails
-   the workflow before anything is built.
-3. **Tag `v*` and publish the release.** That runs the job: cold build-service image,
-   then `verify` (unit tests, rebuild `hello.ts`, compare against the golden file),
-   then the same `verify` again inside `--network none` so an accidental runtime
-   download fails it.
+2. **Bump the version and tag it in one command:**
+   `tools/release/version.py bump minor --tag --push`. It raises the
+   `project(microbit_studio VERSION …)` line, writes the changelog section from the
+   commits since the last tag, commits `chore(release): x.y.z` and creates the
+   annotated tag `vx.y.z`. For a first release of a version that is already in the
+   tree, `tools/release/version.py tag` does the same without the bump.
+3. **Publish the release** from that tag: `gh release create vx.y.z
+   --notes-from-tag` reuses the tag annotation, which is the changelog section.
+   Publishing runs the job: cold build-service image, then `verify` (unit tests,
+   rebuild `hello.ts`, compare against the golden file), then the same `verify`
+   again inside `--network none` so an accidental runtime download fails it.
 4. **Read the job output.** It uploads `build/hello.hex` and the verify log, and a
    failure names the field that moved — `template_hash`, `program_hash`, region
    geometry or the region-2 bytes — so the fix is either a real regression or a
    deliberate pin refresh (below), never a quietly updated golden file.
 
-`version.txt` names the release. Separately, the firmware reports its own application
-version (`project(microbit_studio VERSION …)` and `CONFIG_APP_PROJECT_VER` in
-`firmware/projects/microbit_studio/`); the two are not coupled, and this gate checks
-only that `version.txt` and the tag agree.
+The version lives in one line: `project(microbit_studio VERSION …)` in
+`firmware/projects/microbit_studio/CMakeLists.txt`, because that is the line ESP-Iris
+reads. IDF copies it into the app description, which is the `app_version` a device
+reports, and `system_update.cmake` passes the same value to the system update
+manifest as `release`. The release tag is `v` plus that number, this gate fails a
+published release whose tag is anything else, and
+`tools/preflight/preflight.sh` with `WITH_BUILD=1` fails a build that reports a
+different number, which is how a stale `build/sdkconfig` gets caught.
 
 ## Refreshing the pin (deliberate upgrade)
 
