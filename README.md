@@ -2,7 +2,8 @@
 
 A kid asks an **ESP-Mosaico** for something she wants to see on her **micro:bit**.
 The Mosaico turns the request into a MakeCode program, has it compiled on a build
-box, and flashes the micro:bit over **Bluetooth LE** — no cable, no editor.
+box, and sends it to the micro:bit over **Bluetooth LE**. The board picks up its new
+program over the air.
 
 ![Solution view: the child speaks to the Mosaico, the build box turns it into an image, the image goes over BLE to the micro:bit](docs/architecture/solution.png)
 
@@ -16,18 +17,18 @@ from recorded in the diagram's own JSON. [Interactive version][solution-html] ·
    micro:bit, let go.
 2. **The Mosaico does the rest.** It posts the recording to the build box, which
    transcribes it, writes a MakeCode program from what you said and compiles it. The
-   panel walks its states as each step lands — `LISTENING`, `BUILDING`,
-   `CONNECTING`, `FLASH`, `VERIFY`, `DONE`, or `FAILED` with one plain sentence
-   instead of an error code.
-3. **The program is on the micro:bit.** The board is found over BLE, the image is
-   streamed into its program region, and the Mosaico reconnects and reads that region
-   back to prove it landed. The new program starts by scrolling its revision glyph,
-   so you can see which build is running.
+   panel walks through its states as each step lands: `LISTENING`, `BUILDING`,
+   `CONNECTING`, `FLASH`, `VERIFY`, `DONE`. If a step fails, the panel shows `FAILED`
+   with one plain sentence.
+3. **The program is on the micro:bit.** The Mosaico finds the board over BLE, streams
+   the image into its program region, then reconnects and reads that region back to
+   prove it landed. The new program starts by scrolling its revision glyph, so you can
+   see which build is running.
 
 ## Requirements
 
-**Docker only.** No ESP-IDF, no node, no Python, no venv on the host. Every tool
-lives in a container; `docker compose` is the only entry point.
+**Docker only.** Every tool runs in a container, so the host needs Docker and nothing
+else.
 
 | | |
 |---|---|
@@ -61,38 +62,42 @@ make firmware-hw              # ESP-IDF shell with the Mosaico's USB ports expos
 python3 mosaico.py iris system-update --project projects/microbit_studio
 ```
 
-That builds the app, bundles it and installs it over USB into `main_app`; the retained
-Vibe Mode image is left alone, so `mosaico.py recover` keeps working. It needs the
+That builds the app, bundles it and installs it over USB into `main_app`. The retained
+Vibe Mode image stays as it was, so `mosaico.py recover` keeps working. It needs the
 Wi-Fi and build-box values from the next section compiled in first.
 
-`make down` stops the containers. `make test` runs the unit tests only, and
-`make verify` is the reproducibility gate — see [docs/reproducibility.md](docs/reproducibility.md).
+`make down` stops the containers. `make test` runs the unit tests only. `make verify` is
+the reproducibility gate; see [docs/reproducibility.md](docs/reproducibility.md).
 
-If `make up` reports `address already in use` for 8477, something else on the host owns
-the port (`ss -ltnp | grep 8477`). Stop it, then `make down && make up` — a container left
-behind by the failed bind has no port publish, so restarting it alone will not help.
+If `make up` reports `address already in use` for 8477, another process on the host owns
+the port (`ss -ltnp | grep 8477`). Stop that process, then run `make down && make up`. A
+container left behind by the failed bind has no port publish, so restarting it alone
+will not help.
 
 ## Credentials
 
-Two things to run the whole chain, and only one of them is a secret:
+Two values run the whole chain. Only the second one is secret.
 
 | What | Needed for | Where it goes |
 |---|---|---|
-| An OpenAI-compatible **LLM key** (default provider: DeepSeek) | `POST /v1/speak` — the step that writes the program | `.env` as `MB_LLM_API_KEY`, or `DEEPSEEK_API_KEY` |
+| An OpenAI-compatible **LLM key** (default provider: DeepSeek) | `POST /v1/speak`, the step that writes the program | `.env` as `MB_LLM_API_KEY`, or `DEEPSEEK_API_KEY` |
 | **Wi-Fi SSID, password and the build-box URL** | the Mosaico app, so it can reach the build box | firmware Kconfig: `CONFIG_MB_WIFI_SSID`, `CONFIG_MB_WIFI_PASS`, `CONFIG_MB_BUILD_SERVICE_URL`, `CONFIG_MB_VOICE_SERVICE_URL` |
 
-- **Nothing else is required.** `/v1/health` and `/v1/build` need no credentials, and
-  neither does `make verify`, so the box comes up and compiles payloads with an empty
-  `.env`. Only speech needs the key.
-- **Speech-to-text needs no key of its own.** ASR runs in this repo (`asr/`, a
-  `faster-whisper` sidecar on the compose network). Set `MB_ASR_BASE_URL` /
-  `MB_ASR_API_KEY` only to use a hosted transcriber instead.
-- **The device values are compiled in.** They live in the generated `build/sdkconfig`,
-  never in tracked defaults — the SSID is a secret and the URL is bench-dependent.
-  `tools/preflight/preflight.sh` fails the build when they are empty or still point at
-  `127.0.0.1`.
-- **`GITHUB_TOKEN` in `.env.example` is for pushing to this repository**, not for
-  running anything. No container reads it.
+**Everything else runs without credentials.** `/v1/health` and `/v1/build` open the box
+up, and `make verify` reaches the same point, so the build box comes up and compiles
+payloads with an empty `.env`. Only speech needs the key.
+
+**Speech-to-text runs locally.** ASR is a `faster-whisper` sidecar in `asr/`, reachable
+on the compose network, so it needs no key. Set `MB_ASR_BASE_URL` and `MB_ASR_API_KEY`
+only to use a hosted transcriber instead.
+
+**The device values are compiled in.** They live in the generated `build/sdkconfig`,
+because the SSID is a secret and the URL depends on your bench.
+`tools/preflight/preflight.sh` fails the build when they are empty or still point at
+`127.0.0.1`.
+
+**`GITHUB_TOKEN` in `.env.example` is for pushing to this repository.** No container
+reads it.
 
 Nothing secret lives in this repository or in any image. `.env` is gitignored **and**
 dockerignored, so it cannot reach a commit or a build context.
@@ -101,56 +106,54 @@ dockerignored, so it cannot reach a commit or a build context.
 
 ### The Mosaico: a vibe-coding app
 
-The firmware is an ordinary ESP-Mosaico application built in the `mosaico-idf`
+The firmware is an ordinary ESP-Mosaico application, built in the `mosaico-idf`
 container (ESP-IDF, pinned by image digest) and installed through Vibe Mode into
-`main_app` (`app/ota_0`). The retained Vibe Mode and Recovery images are untouched, so
-`mosaico.py recover` and `system-update` keep working, and **every device operation goes
-through `mosaico.py`** — no `idf.py flash`, no `esptool` offsets. ESP-Iris is what makes
-that possible: it exposes RPC, retained logs, screenshots and the OTA path to the host
-tool.
+`main_app` (`app/ota_0`). The retained Vibe Mode and Recovery images stay untouched, so
+`mosaico.py recover` and `system-update` keep working. **Every device operation runs
+through `mosaico.py`.** ESP-Iris is what makes that possible: it exposes RPC, retained
+logs, screenshots and the OTA path to the host tool.
 
-On the device, four things are wired to one event type (`mb_event_t`): `mb_voice`
-captures the WAV and posts it, `mb_build_client` fetches the image, `mb_ble_central`
-with `mb_flash` does the transfer, and `app_studio` decides which of the eight screens
-is on the GSP-rendered panel. Nothing else consumes those events, which is why the
-screen layer can be replaced without touching the pipeline.
+On the device, four things share one event type (`mb_event_t`): `mb_voice` captures the
+WAV and posts it, `mb_build_client` fetches the image, `mb_ble_central` with `mb_flash`
+does the transfer, and `app_studio` decides which of the eight screens is on the
+GSP-rendered panel. Only `app_studio` consumes those events, which is why the screen
+layer can be replaced without touching the pipeline.
 
 ### The build box: speech in, region-2 bytes out
 
 A micro:bit `.hex` can only be produced by MakeCode's compiler: `mkc` "compiles MakeCode
 (PXT) projects by downloading parts of a released MakeCode web app and running them in
-node.js". Nothing on an ESP32 can do that, so the box is the architecture, not a
-preference.
+node.js". An ESP32 cannot run that compiler, so the box is part of the architecture.
 
 `POST /v1/speak` takes `audio/wav` (or JSON `{"text": "..."}` to skip ASR) and runs the
-whole chain server-side: ASR → LLM → `mkc build` → hexkit. One retry is allowed, and the
-second attempt is given the compiler's own output, so a wrong program is fixed rather
-than reported. The prompt pins the shape — no imports, no `pxt.json` changes, and a
-`REVISION` constant shown at boot so an image is identifiable.
+whole chain server-side: ASR, then LLM, then `mkc build`, then hexkit. One retry is
+allowed, and the second attempt carries the compiler's own output, so a wrong program
+gets a second chance with the log attached. The prompt pins the shape: no imports, no
+`pxt.json` changes, and a `REVISION` constant shown at boot so an image is identifiable.
 
-What comes back is not the hex — about 1.8 MB of base64 the device would have to parse —
-but the **region-2 byte stream** plus its geometry and the two hashes
-(`?region2=true`), which is exactly what the BLE client needs. `GET /v1/health` reports
-the pinned toolchain, and the image is built once with `npm ci` + a warm-up compile so
-runtime builds need no network.
+The reply is the **region-2 byte stream** plus its geometry and the two hashes
+(`?region2=true`), which is what the BLE client writes. Returning the hex would mean
+about 1.8 MB of base64 for the device to parse. `GET /v1/health` reports the pinned
+toolchain, and the image is built once with `npm ci` plus a warm-up compile, so runtime
+builds need no network.
 
 ### The micro:bit update: BLE partial flashing
 
-A MakeCode-built micro:bit v1 runs a partial-flash GATT service. No pairing is
-required, and the 20-byte write payload exactly fills the default ATT MTU, so no MTU
-exchange is needed either. The flash is split into regions: the DAL (region 1) and the
-user program (region 2, `0x37400–0x38BFF` for this template).
+A MakeCode-built micro:bit v1 runs a partial-flash GATT service. Pairing is not
+required, and a 20-byte write already fills the default ATT MTU, so the client skips the
+MTU exchange. The flash splits into regions: the DAL (region 1) and the user program
+(region 2, `0x37400 to 0x38BFF` for this template).
 
 Five opcodes drive it: `REGION_INFO` (`0x00`), `WRITE_DATA` (`0x01`), `END_OF_TX`
-(`0x02`), `STATUS` (`0xEE`) and `RESET` (`0xFF`). The Mosaico connects, reads region 1
-and compares the DAL hash with the image's — a mismatch stops there, before a single
-block is written. Then region 2 is streamed in 64-byte blocks, notify-paced, the board
-resets on `END_OF_TX`, and the Mosaico reconnects to read region 2 back and compare it
-with the program hash.
+(`0x02`), `STATUS` (`0xEE`) and `RESET` (`0xFF`). The Mosaico connects, reads region 1,
+and compares the DAL hash with the image's. A mismatch stops there, before a single
+block is written. Then region 2 is streamed in 64-byte blocks, paced by notifications,
+the board resets on `END_OF_TX`, and the Mosaico reconnects to read region 2 back and
+compare it with the program hash.
 
-That verify pass is not ceremony: region 2 is written **in place**, so a transfer that
-dies mid-stream leaves a half-written program and no BLE service, recoverable only by
-one USB bootstrap. The protocol reference, with the vendor sources it was read from, is
+The verify pass exists because region 2 is written in place: a transfer that dies
+mid-stream leaves a half-written program and no BLE service, recoverable only by one
+USB bootstrap. The protocol reference, with the vendor sources it was read from, is
 [docs/partial-flash-protocol.md](docs/partial-flash-protocol.md).
 
 ## Components
@@ -162,24 +165,24 @@ one USB bootstrap. The protocol reference, with the vendor sources it was read f
 | `firmware/` | ESP-Mosaico application (voice, build client, NimBLE central, UI) | ESP32-S31 in the `mosaico-idf` container |
 | `microbit/` | Pinned MakeCode template, PoC payloads, golden hashes | build input |
 | `tools/hexkit/` | Intel HEX parsing, DAL magic/hash extraction, region-2 block packing | anywhere (reference for the C port) |
-| `docs/` | Architecture, BLE protocol reference, bring-up gates, reproducibility | — |
+| `docs/` | Architecture, BLE protocol reference, bring-up gates, reproducibility | documentation only |
 
 ## Documentation
 
 - [Architecture and contracts](docs/architecture.md)
-- [Component view](docs/architecture/components.html) — the monorepo's parts and the contracts between them ([static PNG](docs/architecture/components.png))
+- [Component view](docs/architecture/components.html): the monorepo's parts and the contracts between them ([static PNG](docs/architecture/components.png))
 - [micro:bit v1 BLE partial-flash protocol](docs/partial-flash-protocol.md)
 - [Bring-up gates](docs/bringup-gates.md)
 - [Reproducibility](docs/reproducibility.md)
 
 ## Scope
 
-micro:bit **v1 (nRF51822)** only. The partial-flash service exists only in
-MakeCode-built images; a board running MicroPython v1 has no BLE stack at all and
-needs one USB flash to bootstrap.
+micro:bit **v1 (nRF51822)** only. The partial-flash service ships only in MakeCode-built
+images, so a board running MicroPython v1 has no BLE stack and needs one USB flash to
+bootstrap.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
 
 [solution-html]: https://htmlpreview.github.io/?https://raw.githubusercontent.com/ozanoner/esp-mosaico-microbit/main/docs/architecture/solution.html
