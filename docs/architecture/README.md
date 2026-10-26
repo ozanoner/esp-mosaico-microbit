@@ -1,20 +1,20 @@
 # Architecture diagrams
 
-Two diagrams, both drawn from this tree — every box cites the file and line range it
+Two diagrams, both drawn from this tree, and every box cites the file and line range it
 came from, and the validator checks those ranges against the pinned commit.
 
 | diagram | JSON (the source) | static | interactive |
 |---|---|---|---|
-| Solution view — the whole chain, board to build box | `solution.json` | `solution.png` | `solution.html` |
-| Component view — the monorepo's parts and their contracts | `components.json` | `components.png` | `components.html` |
-| Studio state machine — the eight states and every transition | `lifecycle.json` | `lifecycle.png` | `lifecycle.html` |
+| Solution view: the whole chain, board to build box | `solution.json` | `solution.png` | `solution.html` |
+| Component view: the monorepo's parts and their contracts | `components.json` | `components.png` | `components.html` |
+| Studio state machine: the eight states and every transition | `lifecycle.json` | `lifecycle.png` | `lifecycle.html` |
 
 The JSON is the source of truth. Do not edit the HTML: the next `finalize` overwrites it.
 
 ## Regenerating
 
 Pinned tool: **archify 3.1.0** (`~/.hermes/profiles/esp32-developer/skills/archify`,
-tag `v3.1.0`). Node >= 18 and a Chrome/Chromium on `PATH` are required — where
+tag `v3.1.0`). Node >= 18 and a Chrome/Chromium on `PATH` are required. Where
 unprivileged user namespaces are restricted, the browser gate needs a `--no-sandbox`
 shim, otherwise it dies with `No usable sandbox!`.
 
@@ -34,7 +34,7 @@ python3 <skill>/scripts/render_archify_png.py docs/architecture/solution.html \
 ```
 
 `--repo-root .` is what makes the evidence check run. A non-zero exit is a failed
-gate, never a warning: read the diagnostics, fix the **JSON**, rerun. Once a run has
+gate: read the diagnostics, fix the **JSON**, rerun. Once a run has
 passed, the HTML owns its browser evidence, so a rerun needs its own
 `--out-dir docs/architecture/review-<n>`.
 
@@ -49,4 +49,4 @@ re-read the cited range when you edit one.
 
 `finalize` writes `*.finalize*.json`, `*.browser-check.json`, `*.delivery.json` and
 `review-*/` next to the diagram. They carry absolute paths, a machine-specific Chrome
-path and timestamps, so they are gitignored — they regenerate on every run.
+path and timestamps, so they are gitignored. They regenerate on every run.
