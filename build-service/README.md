@@ -1,8 +1,8 @@
 # Build service
 
 Turns MakeCode source into a micro:bit v1 `.hex` plus the two region hashes the
-flasher needs. PoC scope: `/v1/health` and `/v1/build`. Speech and LLM endpoints
-arrive once a generated image is proven to boot (gate G4).
+flasher needs, and turns speech into that source. Endpoints: `/v1/health`,
+`/v1/build` and `/v1/speak`.
 
 Runs as a container; the host needs nothing installed.
 
@@ -58,7 +58,7 @@ defaults so a second service on the same LAN box cannot collide with it.
 
 Measured values for the two PoC payloads: `TOOLCHAIN.md`.
 
-## `POST /v1/speak` — speech (or text) in, compiled image out
+## `POST /v1/speak`: speech (or text) in, compiled image out
 
 The voice entry point. Two content types:
 
@@ -77,5 +77,5 @@ One retry, with the compiler's own output fed back. If the second attempt also
 fails, the response is `502` carrying `transcript`, `source`, `attempts` and
 `compiler_message`, so the device can display the real error instead of "try
 again". The prompt forbids imports, packages and `pxt.json` changes, and
-requires a `REVISION` constant shown at boot — the DAL hash must not move, or
+requires a `REVISION` constant shown at boot. The DAL hash must not move, or
 the partial-flash service will refuse the image.

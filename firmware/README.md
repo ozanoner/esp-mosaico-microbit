@@ -11,7 +11,7 @@ python3 mosaico.py iris system-update --project projects/microbit_studio
 python3 mosaico.py iris app-update   --project projects/microbit_studio
 ```
 
-Device operations go through `mosaico.py` only — no `idf.py flash`, no `esptool`
+Device operations go through `mosaico.py` only: no `idf.py flash`, no `esptool`
 offsets. The application lives in `main_app` (`app/ota_0`); the retained Vibe Mode
 firmware is untouched, so `recover` keeps working.
 
@@ -30,14 +30,15 @@ make firmware            # same thing, drops you into a shell
 
 ### Measured facts for the current image
 
-`espressif/idf:latest` (IDF master, revision `ab95e70748f2`, 2026-10-12), from
-`python3 mosaico.py doctor` inside the container:
+`espressif/idf@sha256:6ad927cf…`, the digest `compose.yaml` pins, carries IDF master
+at revision `ab95e70748f2` (2026-10-12). Measured from `python3 mosaico.py doctor`
+inside that container:
 
 | Check | Result |
 |---|---|
-| `idf-version` | **6.2.0** (required ≥ 6.2) — pass |
-| `idf-target` | `esp32s31` available — pass |
-| `idf-revision` | `ab95e70748f2` — pass (not enforced) |
+| `idf-version` | **6.2.0** (required ≥ 6.2), pass |
+| `idf-target` | `esp32s31` available, pass |
+| `idf-revision` | `ab95e70748f2`, pass (not enforced) |
 | `esp-iris` | fails until the ESP-Iris host runtime is bootstrapped into the named volume |
 
 ⚠️ Upstream documents ESP-IDF `7b9cc1ac79f865983f59bb8ff3ff43eb74ff1dbe`
@@ -48,7 +49,7 @@ a tag at or below that revision before blaming our code.
 
 ## Application
 
-`projects/microbit_studio/` — created with the upstream template (names are
+`projects/microbit_studio/`, created with the upstream template (names are
 letters, digits and underscores only; hyphens are rejected):
 
 ```sh
@@ -60,10 +61,14 @@ Components to add on top of the template:
 
 | Component | Purpose |
 |---|---|
+| `mb_voice` | push-to-talk capture, `POST /v1/speak` |
+| `mb_build_client` | `POST /v1/build?region2=true`; TLS buffers and the image in PSRAM |
 | `mb_payload` | Intel HEX → region-2 64-byte blocks (C port of `tools/hexkit`) |
-| `mb_flash` | NimBLE central + partial-flash client |
-| `build_service_client` | HTTPS to the build service, TLS buffers in PSRAM |
+| `mb_flash` | the partial-flash packet codec (`REGION_INFO`, `WRITE_DATA`, `END_OF_TX`) |
+| `mb_ble_central` | NimBLE central: scan, connect, CCCD, notify-paced writes, verify |
+| `app_display` | BSP panel and screen mirroring |
 | `app_studio` | state machine + GSP scene |
+| `mb_event` | the event type the pipeline emits |
 
 `project init` initialises an independent git repository inside
 `projects/<name>`; this monorepo tracks the application as ordinary files, so that

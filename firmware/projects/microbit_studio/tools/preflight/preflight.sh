@@ -14,7 +14,7 @@ fail=0
 step() { printf '\n=== %s\n' "$1"; }
 report() { if [ "$1" -ne 0 ]; then fail=1; echo "  -> FAILED"; fi; }
 
-step "1/5 state machine (host, no board)"
+step "1/7 state machine (host, no board)"
 tmp_bin=$(mktemp -t studio_test.XXXXXX)
 gcc -std=c11 -Wall -Wextra -O1 -o "$tmp_bin" \
     tools/preflight/harness/test_state_machine.c \
@@ -26,16 +26,16 @@ gcc -std=c11 -Wall -Wextra -O1 -o "$tmp_bin" \
 if [ "$fail" -eq 0 ]; then "$tmp_bin"; report $?; fi
 rm -f "$tmp_bin"
 
-step "2/5 text fits its column"
+step "2/7 text fits its column"
 "$PY" tools/preflight/check_text_fit.py; report $?
 
-step "3/5 scene budget"
+step "3/7 scene budget"
 "$PY" tools/preflight/check_bundle.py; report $?
 
-step "4/5 bench configuration"
+step "4/7 bench configuration"
 "$PY" tools/preflight/check_config.py; report $?
 
-step "5/5 build-service contract (audio fixture -> program -> image)"
+step "5/7 build-service contract (audio fixture -> program -> image)"
 base=$("$PY" - <<'EOF'
 import pathlib, re
 h = pathlib.Path("build/config/sdkconfig.h")
@@ -51,12 +51,21 @@ else
     "$PY" tools/preflight/test_service_audio.py; report $?
 fi
 
+step "6/7 firmware build"
 if [ "${WITH_BUILD:-0}" = "1" ]; then
-    step "6/6 firmware build"
     idf.py build >/tmp/preflight_build.log 2>&1
     status=$?
     tail -3 /tmp/preflight_build.log
     report $status
+else
+    echo "  SKIP: needs the ESP-IDF container, rerun with WITH_BUILD=1 there"
+fi
+
+step "7/7 application version"
+if [ -f build/project_description.json ]; then
+    "$PY" tools/preflight/check_version.py; report $?
+else
+    echo "  SKIP: build once first"
 fi
 
 printf '\n%s\n' "$([ "$fail" -eq 0 ] && echo 'PREFLIGHT PASS — safe to install' || echo 'PREFLIGHT FAIL — do not install')"

@@ -1,0 +1,82 @@
+# Release-time reproducibility gate.
+#
+# Deliberately not wired to `push` or `pull_request`: PR feedback stays fast, and
+# a cold Docker build on every push buys little. A release is the moment a build
+# becomes something other people rely on, so that is when the gate runs — plus a
+# manual trigger for verifications that are not a release. See issue #9.
+name: verify-release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to verify (tag, branch or SHA). Empty = default branch."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  reproducible-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Resolve target ref
+        id: target
+        run: |
+          set -euo pipefail
+          ref="${{ github.event.release.tag_name }}"
+          [ -n "$ref" ] || ref="${{ inputs.ref }}"
+          [ -n "$ref" ] || ref="${{ github.ref_name }}"
+          # Artifact names reject '/', which branch refs contain.
+          slug="$(printf '%s' "$ref" | tr '/' '-' | tr -cd 'A-Za-z0-9._-')"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "slug=$slug" >> "$GITHUB_OUTPUT"
+
+      # No submodules: the gate builds a MakeCode payload, not the firmware.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.ref }}
+
+      # The version the firmware reports and the tag this release publishes are the
+      # same number, read from the one place ESP-Iris reads it: the CMake project
+      # version. The comparison and the grammar live in tools/release/version.py so
+      # the release path and the gate cannot disagree about either.
+      - name: tag names the version the firmware reports
+        if: github.event_name == 'release'
+        run: |
+          set -euo pipefail
+          python3 tools/release/version.py check-tag "${{ github.event.release.tag_name }}"
+
+      # Only the build-service image is needed. `asr` is a runtime dependency of
+      # the service, not of `verify`, and its tag is local-only (never pushed),
+      # so it must not be built or started here — hence --no-deps below.
+      - name: Build the pinned build-service image
+        run: docker compose build build-service
+
+      - name: Tests, rebuild and golden-hash comparison
+        run: |
+          set -o pipefail
+          docker compose run --rm --no-deps build-service verify | tee verify.log
+
+      # The image is resolved from the compose file, not from `compose images -q`:
+      # that command lists images of *containers*, and `run --rm` leaves none, so
+      # it resolves to an empty string on a clean runner.
+      - name: The image can build with no network
+        run: |
+          set -euo pipefail
+          image="$(docker compose config --format json | jq -r '.services["build-service"].image')"
+          echo "image: $image"
+          docker run --rm --network none -v "$PWD":/workspace "$image" verify
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verify-${{ steps.target.outputs.slug }}
+          path: |
+            build/hello.hex
+            verify.log
+          if-no-files-found: warn

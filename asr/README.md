@@ -7,7 +7,7 @@ compose network only.
 
 ## Why a sidecar and not baked into the build service
 
-The compiler image stays as it was — a clone that only needs `/v1/build` never
+The compiler image stays as it was, so a clone that only needs `/v1/build` never
 pulls 150 MB of model weights. It is also swappable: point `MB_ASR_BASE_URL` at
 Groq, OpenAI, Voicebox (`http://<host>:17493`) or a `faster-whisper` server on
 another machine and this container is simply not started.

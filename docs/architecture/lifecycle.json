@@ -1,0 +1,250 @@
+{
+  "schema_version": 3,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "esp-mosaico-microbit — studio state machine",
+    "locale": "en",
+    "output": "docs/architecture/lifecycle.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/ozanoner/esp-mosaico-microbit.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "69b0ec42b2ec5a5b823a6728313532d5d304f577"
+    }
+  },
+  "mainPath": [
+    "idle",
+    "listening",
+    "building",
+    "await",
+    "flashing",
+    "verifying",
+    "done"
+  ],
+  "states": [
+    {
+      "id": "idle",
+      "type": "start",
+      "label": "IDLE",
+      "step": "01",
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/components/app_studio/app_studio.c",
+          "line": 287,
+          "end_line": 287,
+          "label": "created in IDLE"
+        }
+      ]
+    },
+    {
+      "id": "listening",
+      "type": "active",
+      "label": "LISTENING",
+      "step": "02",
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/components/app_studio/app_studio.c",
+          "line": 245,
+          "end_line": 247,
+          "label": "accepted from IDLE, DONE, FAILED"
+        }
+      ]
+    },
+    {
+      "id": "building",
+      "type": "active",
+      "label": "BUILDING",
+      "step": "03",
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/components/app_studio/app_studio.c",
+          "line": 248,
+          "end_line": 250,
+          "label": "button released, request in flight"
+        }
+      ]
+    },
+    {
+      "id": "await",
+      "type": "waiting",
+      "label": "CONNECTING",
+      "step": "04",
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/components/app_studio/app_studio.c",
+          "line": 251,
+          "end_line": 253,
+          "label": "image ready, then scan"
+        }
+      ]
+    },
+    {
+      "id": "flashing",
+      "type": "active",
+      "label": "FLASH",
+      "step": "05",
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/components/app_studio/app_studio.c",
+          "line": 254,
+          "end_line": 256,
+          "label": "progress only moves the bar"
+        }
+      ]
+    },
+    {
+      "id": "verifying",
+      "type": "decision",
+      "label": "VERIFY",
+      "step": "06",
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/components/app_studio/app_studio.c",
+          "line": 257,
+          "end_line": 261,
+          "label": "also entered straight from AWAIT_MICROBIT"
+        }
+      ]
+    },
+    {
+      "id": "done",
+      "type": "success",
+      "label": "DONE",
+      "step": "07",
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/components/app_studio/app_studio.c",
+          "line": 262,
+          "end_line": 263,
+          "label": "from FLASHING or VERIFYING"
+        }
+      ]
+    },
+    {
+      "id": "failed",
+      "type": "failure",
+      "label": "FAILED",
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/components/app_studio/app_studio.c",
+          "line": 264,
+          "end_line": 268,
+          "label": "never from LISTENING"
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "id": "idle-listening",
+      "from": "idle",
+      "to": "listening",
+      "label": "press"
+    },
+    {
+      "id": "listening-building",
+      "from": "listening",
+      "to": "building",
+      "label": "send"
+    },
+    {
+      "id": "building-await",
+      "from": "building",
+      "to": "await",
+      "label": "image"
+    },
+    {
+      "id": "await-flashing",
+      "from": "await",
+      "to": "flashing",
+      "label": "block"
+    },
+    {
+      "id": "flashing-verifying",
+      "from": "flashing",
+      "to": "verifying",
+      "label": "end"
+    },
+    {
+      "id": "verifying-done",
+      "from": "verifying",
+      "to": "done",
+      "label": "match"
+    },
+    {
+      "id": "await-verifying",
+      "from": "await",
+      "to": "verifying",
+      "label": "no write"
+    },
+    {
+      "id": "building-failed",
+      "from": "building",
+      "to": "failed",
+      "label": "error"
+    },
+    {
+      "id": "await-failed",
+      "from": "await",
+      "to": "failed",
+      "label": "no board"
+    },
+    {
+      "id": "flashing-failed",
+      "from": "flashing",
+      "to": "failed",
+      "label": "dropped"
+    },
+    {
+      "id": "verifying-failed",
+      "from": "verifying",
+      "to": "failed",
+      "label": "mismatch"
+    },
+    {
+      "id": "done-idle",
+      "from": "done",
+      "to": "idle",
+      "label": "10 s"
+    },
+    {
+      "id": "failed-idle",
+      "from": "failed",
+      "to": "idle",
+      "label": "8 s"
+    },
+    {
+      "id": "done-listening",
+      "from": "done",
+      "to": "listening",
+      "label": "press"
+    },
+    {
+      "id": "failed-listening",
+      "from": "failed",
+      "to": "listening",
+      "label": "press"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The table is strict on purpose",
+      "items": [
+        "A state accepts only the event that moves it to the next step; anything else is dropped",
+        "That is what stops a stale report from a previous cycle repainting a finished screen",
+        "FAILED is refused from LISTENING: while the button is held, nothing is in flight",
+        "AWAIT_MICROBIT can go straight to VERIFYING when the board already holds the program: nothing is written, so no FLASHING is emitted"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Both terminal states time out",
+      "items": [
+        "DONE dwells 10 s, FAILED 8 s, then return_to_idle re-arms the AI button",
+        "A new press works from IDLE, DONE or FAILED without waiting out the dwell"
+      ]
+    }
+  ]
+}

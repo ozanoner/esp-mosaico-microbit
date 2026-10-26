@@ -1,6 +1,6 @@
 # mb_payload
 
-C port of `tools/hexkit` — the Intel HEX geometry the flasher needs: where the
+C port of `tools/hexkit`: the Intel HEX geometry the flasher needs, where the
 DAL magic sits, which eight bytes are the template and program hashes, where
 region 2 starts and ends, and how it packs into 64-byte blocks.
 
@@ -18,8 +18,8 @@ service's language, and gives the host test something to compare against.
 
 - **Only region 2 is kept.** hexkit builds a sparse map of the whole image; this
   port stores a fixed window, `0x30000-0x3BBFF` (47.6 KB), supplied by the
-  caller. The device never parses a 1.3 MB hex — it streams the pre-extracted
-  fixture — so the window exists for the host test and for future on-device use.
+  caller. The device never parses a 1.3 MB hex: it streams the pre-extracted
+  fixture, so the window exists for the host test and for future on-device use.
 - **The DAL magic is searched inside that window.** If a future image carried the
   magic outside region 2, hexkit would report a range error and this port would
   report `MB_PAYLOAD_ERR_NO_MAGIC`. Same refusal, different code.

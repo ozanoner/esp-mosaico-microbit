@@ -1,0 +1,447 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "esp-mosaico-microbit — monorepo components",
+    "locale": "en",
+    "output": "docs/architecture/components.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/ozanoner/esp-mosaico-microbit.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "69b0ec42b2ec5a5b823a6728313532d5d304f577"
+    }
+  },
+  "components": [
+    {
+      "id": "main",
+      "type": "backend",
+      "label": "main",
+      "sublabel": "composition root",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        196,
+        62
+      ],
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/main/main.c",
+          "line": 66,
+          "end_line": 88,
+          "label": "boot, display, GSP, studio"
+        }
+      ]
+    },
+    {
+      "id": "app_studio",
+      "type": "backend",
+      "label": "app_studio",
+      "sublabel": "8 states, GSP scene",
+      "pos": [
+        40,
+        130
+      ],
+      "size": [
+        196,
+        62
+      ],
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/components/app_studio/app_studio.c",
+          "line": 81,
+          "end_line": 84,
+          "label": "IDLE to FAILED state names"
+        }
+      ]
+    },
+    {
+      "id": "mb_voice",
+      "type": "backend",
+      "label": "mb_voice",
+      "sublabel": "capture, POST WAV",
+      "pos": [
+        40,
+        290
+      ],
+      "size": [
+        196,
+        62
+      ],
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/components/mb_voice/mb_voice.c",
+          "line": 216,
+          "end_line": 246,
+          "label": "HTTP POST of the recording"
+        }
+      ]
+    },
+    {
+      "id": "mb_build_client",
+      "type": "backend",
+      "label": "mb_build_client",
+      "sublabel": "image into PSRAM",
+      "pos": [
+        40,
+        370
+      ],
+      "size": [
+        196,
+        62
+      ],
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/components/mb_build_client/mb_build_client.c",
+          "line": 212,
+          "end_line": 224,
+          "label": "region2=true, buffer in PSRAM"
+        }
+      ]
+    },
+    {
+      "id": "mb_ble_central",
+      "type": "backend",
+      "label": "mb_ble_central",
+      "sublabel": "NimBLE central, cycles",
+      "pos": [
+        40,
+        450
+      ],
+      "size": [
+        196,
+        62
+      ],
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/components/mb_ble_central/mb_ble_central.c",
+          "line": 96,
+          "end_line": 104,
+          "label": "connect, stream, reconnect, verify"
+        }
+      ]
+    },
+    {
+      "id": "app_display",
+      "type": "backend",
+      "label": "app_display",
+      "sublabel": "BSP panel + mirror",
+      "pos": [
+        270,
+        40
+      ],
+      "size": [
+        186,
+        62
+      ],
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/components/app_display/app_display.c",
+          "line": 70,
+          "end_line": 70,
+          "label": "app_display_init"
+        }
+      ]
+    },
+    {
+      "id": "mb_payload",
+      "type": "backend",
+      "label": "mb_payload",
+      "sublabel": "region-2 64-byte blocks",
+      "pos": [
+        270,
+        370
+      ],
+      "size": [
+        186,
+        62
+      ],
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/components/mb_payload/include/mb_payload.h",
+          "line": 36,
+          "end_line": 40,
+          "label": "region bounds and block size"
+        }
+      ]
+    },
+    {
+      "id": "mb_flash",
+      "type": "backend",
+      "label": "mb_flash",
+      "sublabel": "partial-flash packets",
+      "pos": [
+        270,
+        450
+      ],
+      "size": [
+        186,
+        62
+      ],
+      "sources": [
+        {
+          "path": "firmware/projects/microbit_studio/components/mb_flash/mb_flash.c",
+          "line": 29,
+          "end_line": 47,
+          "label": "REGION_INFO and WRITE_DATA packets"
+        }
+      ]
+    },
+    {
+      "id": "http_api",
+      "type": "backend",
+      "label": "HTTP API",
+      "sublabel": "/v1/health, build, speak",
+      "pos": [
+        560,
+        240
+      ],
+      "size": [
+        200,
+        62
+      ],
+      "sources": [
+        {
+          "path": "build-service/mb_build_service/app.py",
+          "line": 69,
+          "end_line": 90,
+          "label": "build and speak endpoints"
+        }
+      ]
+    },
+    {
+      "id": "speak",
+      "type": "backend",
+      "label": "speak pipeline",
+      "sublabel": "transcript to program, 1 retry",
+      "pos": [
+        560,
+        330
+      ],
+      "size": [
+        200,
+        62
+      ],
+      "sources": [
+        {
+          "path": "build-service/mb_build_service/speak.py",
+          "line": 112,
+          "end_line": 132,
+          "label": "generate_program retries with the log"
+        }
+      ]
+    },
+    {
+      "id": "builder",
+      "type": "backend",
+      "label": "builder",
+      "sublabel": "mkc + hexkit",
+      "pos": [
+        560,
+        420
+      ],
+      "size": [
+        200,
+        62
+      ],
+      "sources": [
+        {
+          "path": "build-service/mb_build_service/builder.py",
+          "line": 24,
+          "end_line": 24,
+          "label": "extracts geometry with hexkit"
+        },
+        {
+          "path": "build-service/mb_build_service/builder.py",
+          "line": 62,
+          "end_line": 65,
+          "label": "refuses to run without the pinned mkc"
+        }
+      ]
+    },
+    {
+      "id": "providers",
+      "type": "backend",
+      "label": "providers",
+      "sublabel": "ASR and LLM over HTTP",
+      "pos": [
+        790,
+        330
+      ],
+      "size": [
+        190,
+        62
+      ],
+      "sources": [
+        {
+          "path": "build-service/mb_build_service/providers.py",
+          "line": 71,
+          "end_line": 80,
+          "label": "transcriber"
+        },
+        {
+          "path": "build-service/mb_build_service/providers.py",
+          "line": 122,
+          "end_line": 132,
+          "label": "generator"
+        }
+      ]
+    },
+    {
+      "id": "template",
+      "type": "external",
+      "label": "microbit/template",
+      "sublabel": "pinned pxt.json",
+      "pos": [
+        790,
+        420
+      ],
+      "size": [
+        190,
+        62
+      ],
+      "sources": [
+        {
+          "path": "microbit/template/pxt.json",
+          "line": 14,
+          "end_line": 22,
+          "label": "DAL partial_flashing config"
+        }
+      ]
+    },
+    {
+      "id": "hexkit",
+      "type": "backend",
+      "label": "tools/hexkit",
+      "sublabel": "DAL magic, hashes, region 2",
+      "pos": [
+        790,
+        510
+      ],
+      "size": [
+        190,
+        62
+      ],
+      "sources": [
+        {
+          "path": "tools/hexkit/hexkit.py",
+          "line": 145,
+          "end_line": 159,
+          "label": "magic address, hashes, region2"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "firmware/projects/microbit_studio",
+      "wraps": [
+        "main",
+        "app_studio",
+        "app_display",
+        "mb_voice",
+        "mb_build_client",
+        "mb_ble_central",
+        "mb_payload",
+        "mb_flash"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "build box: service + pinned inputs",
+      "wraps": [
+        "http_api",
+        "speak",
+        "builder",
+        "providers",
+        "template",
+        "hexkit"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "from": "main",
+      "to": "app_studio",
+      "label": "creates"
+    },
+    {
+      "from": "main",
+      "to": "app_display",
+      "label": "inits panel"
+    },
+    {
+      "from": "mb_voice",
+      "to": "http_api",
+      "label": "WAV",
+      "variant": "emphasis"
+    },
+    {
+      "from": "mb_build_client",
+      "to": "http_api",
+      "label": "region2=true",
+      "variant": "emphasis"
+    },
+    {
+      "from": "mb_ble_central",
+      "to": "mb_payload",
+      "label": "blocks"
+    },
+    {
+      "from": "mb_ble_central",
+      "to": "mb_flash",
+      "label": "packets"
+    },
+    {
+      "from": "http_api",
+      "to": "speak",
+      "label": "route"
+    },
+    {
+      "from": "speak",
+      "to": "builder",
+      "label": "compile"
+    },
+    {
+      "from": "speak",
+      "to": "providers",
+      "label": "transcribe, generate"
+    },
+    {
+      "from": "builder",
+      "to": "template",
+      "label": "pxt.json"
+    },
+    {
+      "from": "builder",
+      "to": "hexkit",
+      "label": "region 2"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "One event type, one consumer",
+      "items": [
+        "mb_event_t is the only thing voice, build client and BLE central emit",
+        "app_studio is the only consumer, so the screen layer stays replaceable",
+        "mb_payload is the C port of tools/hexkit; the host tests pin both"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Vendor code stays outside",
+      "items": [
+        "firmware/submodule/esp-mosaico-utils and -bsp are pinned gitlinks",
+        "Local fixes ship as firmware/patches/*.patch, never as submodule edits",
+        "app_display is the only component that touches the BSP"
+      ]
+    }
+  ]
+}

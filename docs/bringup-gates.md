@@ -1,9 +1,9 @@
 # Bring-up gates
 
 Four checks that decide whether the architecture holds. No protocol code is
-written until G1–G3 pass; G4 is the PoC.
+written until G1 to G3 pass; G4 is the PoC.
 
-## G1 — the build box can be trusted
+## G1: the build box can be trusted
 
 **Question:** does a pinned `mkc` install produce a hex whose DAL hash matches a
 reference hex built by the web editor at the same version?
@@ -18,11 +18,11 @@ python -m hexkit inspect build/hello.hex        # prints magic address + hashes
 ```
 
 **Pass:** magic found at `0x30000`, two 8-byte hashes printed, region 2 inside
-`0x30000–0x3BBFF`, and the same hashes as a hex built from the same MakeCode
+`0x30000 to 0x3BBFF`, and the same hashes as a hex built from the same MakeCode
 version in the browser. **Fail ⇒ stop:** without a stable DAL hash the flasher
 refuses every image it is given.
 
-## G2 — the service answers outside pairing mode
+## G2: the service answers outside pairing mode
 
 **Question:** with a *running* MakeCode app that started Bluetooth, does the
 partial-flash service respond, or is pairing mode required every time?
@@ -32,9 +32,9 @@ partial-flash service respond, or is pairing mode required every time?
 
 **Pass:** `0xEE` answered in application mode ⇒ the kid never touches the board.
 **Fail:** the flow keeps a physical step (hold A+B, tap reset), surfaced on the
-Mosaico's screen — still shippable, but the UX changes and the spec must say so.
+Mosaico's screen. The result is still shippable, but the UX changes and the spec must say so.
 
-## G3 — hashes agree
+## G3: hashes agree
 
 **Question:** do REGION_INFO regions 1/2 from the device equal the two hashes
 extracted from our hex?
@@ -42,7 +42,7 @@ extracted from our hex?
 **Pass:** equal ⇒ partial flash is legal. Not equal ⇒ the device needs a
 full-flash/bootstrap to our pinned toolchain first (one USB flash).
 
-## G4 — PoC: generated image runs
+## G4: PoC, generated image runs
 
 Flash `build/hello.hex` end to end, then reconnect and compare region 2 against
 `program_hash`.

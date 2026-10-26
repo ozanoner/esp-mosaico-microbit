@@ -27,9 +27,9 @@ to be appended onto the end of the DAL" (v1 and v2 partial-flash docs).
 |---|---|---|---|
 | `0x00` | REGION_INFO | region id (0=SoftDevice, 1=DAL, 2=PXT) | notify `00 <id> <start:4> <end:4> <hash:8>` |
 | `0x01` | WRITE_DATA | `offset hi:2` / `offset lo:2` / packet# / 16 data bytes | notify `01 FF` or `01 AA` |
-| `0x02` | END_OF_TX | — | device strips the embedded-source magic and resets |
-| `0xEE` | STATUS | — | notify `EE <pfs version> <mode>` (mode 0 = pairing, 1 = application) |
-| `0xFF` | RESET | `0x00` pairing mode, `0x01` application | — |
+| `0x02` | END_OF_TX | none | device strips the embedded-source magic and resets |
+| `0xEE` | STATUS | none | notify `EE <pfs version> <mode>` (mode 0 = pairing, 1 = application) |
+| `0xFF` | RESET | `0x00` pairing mode, `0x01` application | none |
 
 ### The address-split quirk (this one bites)
 
@@ -37,10 +37,10 @@ to be appended onto the end of the DAL" (v1 and v2 partial-flash docs).
 target address from the **first two packets of each 4-packet block**, not from
 every packet:
 
-- packet 0 → `offset  = (data[1] << 8) | data[2]` — the **low** 16 bits
-- packet 1 → `offset |= (data[1] << 24) | (data[2] << 16)` — the **high** 16 bits
+- packet 0 → `offset  = (data[1] << 8) | data[2]`, the **low** 16 bits
+- packet 1 → `offset |= (data[1] << 24) | (data[2] << 16)`, the **high** 16 bits
 - packets 2 and 3 carry no address bytes, and 0 is the value they must hold
-- packets 0–3 each carry 16 bytes → **64 bytes written per block** at that address
+- packets 0 to 3 each carry 16 bytes → **64 bytes written per block** at that address
 
 So region 2 at `0x37400` is sent as packet 0 `01 74 00 …` and packet 1
 `01 00 03 …`. (An earlier revision of this page had the two halves the other way
@@ -61,12 +61,12 @@ documents:
 
 | Region | Contents | Range |
 |---|---|---|
-| 0 | SoftDevice | `0x00000–0x18000` |
-| 1 | DAL | `0x18000–0x30000` |
-| 2 | PXT user program | `0x30000–0x3BBFF` |
+| 0 | SoftDevice | `0x00000 to 0x18000` |
+| 1 | DAL | `0x18000 to 0x30000` |
+| 2 | PXT user program | `0x30000 to 0x3BBFF` |
 
 ⚠️ **Region 2's real start moves.** In an image built by `mkc` 1.3.6 the DAL ends
-at **`0x37400`**, and the magic sits there — not at `0x30000`. Region 1's end is
+at **`0x37400`**, and the magic sits there rather than at `0x30000`. Region 1's end is
 `FLASH_PROGRAM_END` from the DAL build, so the client must take the magic address
 from the new image and never hardcode it. Measured values: `build-service/TOOLCHAIN.md`.
 
@@ -90,16 +90,16 @@ Consequences for the host:
 
 Because region 2's reported hash is the one *declared in the image* rather than a
 computed CRC, reading it back after the reboot proves the image (and its header)
-landed — it does not prove the program runs.
+landed. It does not prove the program runs.
 
 ## Preconditions on the device
 
 - Firmware must be a MakeCode build (DAL present).
-- The DAL must be advertising: in pairing mode (hold A+B, tap reset — or triple-tap
+- The DAL must be advertising: in pairing mode (hold A+B, tap reset, or triple-tap
   reset), or because the running program started Bluetooth itself.
 - If the MakeCode project was built with "No pairing required: anyone can connect
   via Bluetooth", no passkey/pattern step is needed. The exact `pxt.json` key that
-  encodes that setting is **unverified** — resolve it when pinning the template.
+  encodes that setting is **unverified**, so resolve it when pinning the template.
 
 ## Fallback: full flash (out of PoC scope)
 
@@ -113,9 +113,9 @@ Nordic **legacy DFU** (`0xFE59`). Implementations to port rather than invent:
 - Does the partial-flash service answer while a *running app* owns BLE, rather than
   in pairing mode? (gate G2)
 - Is a partial final block accepted when padded with `0xFF` to 64 bytes?
-- Measured throughput: 64 B per notification round-trip ⇒ expected ~1.5–3 kB/s.
+- Measured throughput: 64 B per notification round-trip ⇒ expected ~1.5 to 3 kB/s.
   Reference payload sizes from a real build: 4096 B (64 blocks) and 6144 B
-  (96 blocks) for the two PoC programs — tens of seconds, not minutes.
+  (96 blocks) for the two PoC programs, tens of seconds rather than minutes.
 
 ## What a real `mkc` 1.3.6 build actually contains
 
@@ -127,6 +127,6 @@ Measured, not assumed:
   flash data; the parser records the others and ignores them.
 - the image spans the whole 256 KB part: SoftDevice, DAL + program, and the
   bootloader at `0x3C000` plus UICR at `0x10001xxx`. The transfer range is not the
-  image range — it starts at the magic and ends at the last program page.
+  image range: it starts at the magic and ends at the last program page.
 - the last page is padded with `0xFF` because the device erases a page before
   writing into it; sending a partial page would drop the rest of it.

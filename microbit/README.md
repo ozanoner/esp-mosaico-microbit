@@ -2,12 +2,12 @@
 
 No firmware development happens here. The partial-flash service ships inside the
 DAL and is enabled for MakeCode programs ("partial flashing is only supported by
-programs built using MakeCode" — micro:bit partial-flash docs), so all we own is:
+programs built using MakeCode", from the micro:bit partial-flash docs), so all we own is:
 
-- `template/` — the pinned MakeCode project the build service compiles. Only
-  `main.ts` varies between builds; `pxt.json` is fixed so the DAL — and therefore
-  the template hash compared during flashing — never moves.
-- `payloads/` — example programs, used by the PoC and by tests.
+- `template/`: the pinned MakeCode project the build service compiles. Only
+  `main.ts` varies between builds; `pxt.json` is fixed so the DAL, and therefore
+  the template hash compared during flashing, never moves.
+- `payloads/`: example programs, used by the PoC and by tests.
 
 ## Template rules
 
@@ -16,7 +16,7 @@ programs built using MakeCode" — micro:bit partial-flash docs), so all we own 
    proves whether the partial-flash service answers in that mode.
 2. A two-character revision glyph is shown at boot: human-visible proof of which
    build is running, since the Mosaico cannot see the LED matrix.
-3. **No pairing, set at build time** — `pxt.json` carries
+3. **No pairing, set at build time.** `pxt.json` carries
 
    ```json
    "yotta": { "config": { "microbit-dal": { "bluetooth": { "open": 1 } } } }
@@ -40,6 +40,6 @@ toolchain** is the bootstrap step; everything after that is BLE.
 
 ## Payload limits
 
-Region 2 is `0x30000–0x3BBFF` = 47.6 KB on a 256 KB part. Pad the last 64-byte
+Region 2 is `0x30000 to 0x3BBFF`, which is 47.6 KB on a 256 KB part. Pad the last 64-byte
 block, do not exceed the region, and remember that the transfer stops at the page
 containing the embedded-source magic.

@@ -1,8 +1,8 @@
 # app_studio
 
 The studio panel: an eight-state controller and the scene it renders on the
-480×480 display. Portable C — it talks to ESP-GSP and to `mb_event_t`, never to
-ESP-IDF drivers — so the same controller runs in the simulator through
+480×480 display. Portable C: it talks to ESP-GSP and to `mb_event_t`, and never to
+ESP-IDF drivers, so the same controller runs in the simulator through
 `host/`.
 
 ## States
@@ -13,14 +13,14 @@ ESP-IDF drivers — so the same controller runs in the simulator through
 | `LISTENING` | `LISTENING` | listening… | bear |
 | `BUILDING` | `BUILDING` | building your program… | bear |
 | `AWAIT_MICROBIT` | `CONNECTING` | waiting for micro:bit… | bear; ritual text after 15 s |
-| `FLASHING` | `FLASHING` | — | bear + five-segment progress |
+| `FLASHING` | `FLASHING` | none | bear + five-segment progress |
 | `VERIFYING` | `VERIFYING` | checking your program… | bear |
-| `DONE` | — | — | trophy clip |
-| `FAILED` | `FAILED` | the reason | — |
+| `DONE` | none | none | trophy clip |
+| `FAILED` | `FAILED` | the reason | none |
 
 `CONNECTING` is the only screen label that differs from the state name: at 40 px
 `AWAIT_MICROBIT` needs 336 px and the app column gives 288. `PAIRING` was
-rejected as a wording — gate G2 measured `mode=1`, this flow never pairs.
+rejected as a wording, because gate G2 measured `mode=1` and this flow never pairs.
 
 ## Event contract
 
@@ -42,7 +42,7 @@ solid.
 
 `assets/microbit-front.png`, `assets/bear.png`, `assets/trophy.gif` (34 frames,
 80 ms, 172×240). GSP only draws raster contents when the compiled image cache has
-a budget — packing with the default `image_cache_budget_bytes=0` produces a scene
+a budget. Packing with the default `image_cache_budget_bytes=0` produces a scene
 where every image is invisible, in the simulator and on the device alike. Set the
 budget in the build configuration.
 
