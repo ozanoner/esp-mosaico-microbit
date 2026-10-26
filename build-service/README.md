@@ -1,8 +1,8 @@
 # Build service
 
 Turns MakeCode source into a micro:bit v1 `.hex` plus the two region hashes the
-flasher needs. PoC scope: `/v1/health` and `/v1/build`. Speech and LLM endpoints
-arrive once a generated image is proven to boot (gate G4).
+flasher needs, and turns speech into that source. Endpoints: `/v1/health`,
+`/v1/build` and `/v1/speak`.
 
 Runs as a container; the host needs nothing installed.
 

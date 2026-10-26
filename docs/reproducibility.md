@@ -7,7 +7,7 @@ Goal: `git clone` → `make verify` → same bytes, on any machine with Docker.
 | Thing | Pinned by | File |
 |---|---|---|
 | MakeCode compiler (`mkc`) | exact npm version `1.3.6`, lockfile, `npm ci` | `build-service/package.json`, `build-service/package-lock.json` |
-| MakeCode editor worker | baked into the image at build time (`/root/.pxt`) | `build-service/Dockerfile` |
+| MakeCode editor worker | downloaded from the CDN at **image-build time** and frozen into the image (`/root/.pxt`) — not version-pinned, so it is only as fixed as the last image build | `build-service/Dockerfile` |
 | Python dependencies | frozen lock, `uv sync --frozen` | `build-service/uv.lock` |
 | Node base image | digest | `build-service/Dockerfile` |
 | ESP-IDF toolchain | image digest | `compose.yaml` |

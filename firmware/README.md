@@ -30,8 +30,9 @@ make firmware            # same thing, drops you into a shell
 
 ### Measured facts for the current image
 
-`espressif/idf:latest` (IDF master, revision `ab95e70748f2`, 2026-10-12), from
-`python3 mosaico.py doctor` inside the container:
+`espressif/idf@sha256:6ad927cf…` — the digest `compose.yaml` pins — carries IDF master
+at revision `ab95e70748f2` (2026-10-12). Measured from `python3 mosaico.py doctor`
+inside that container:
 
 | Check | Result |
 |---|---|

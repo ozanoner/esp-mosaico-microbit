@@ -7,6 +7,7 @@ came from, and the validator checks those ranges against the pinned commit.
 |---|---|---|---|
 | Solution view — the whole chain, board to build box | `solution.json` | `solution.png` | `solution.html` |
 | Component view — the monorepo's parts and their contracts | `components.json` | `components.png` | `components.html` |
+| Studio state machine — the eight states and every transition | `lifecycle.json` | `lifecycle.png` | `lifecycle.html` |
 
 The JSON is the source of truth. Do not edit the HTML: the next `finalize` overwrites it.
 

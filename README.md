@@ -4,21 +4,16 @@ A kid asks an **ESP-Mosaico** for something she wants to see on her **micro:bit*
 The Mosaico turns the request into a MakeCode program, has it compiled on a build
 box, and flashes the micro:bit over **Bluetooth LE** — no cable, no editor.
 
-```
-   kid's voice          build box (container)            ESP-Mosaico (ESP32-S31)          micro:bit v1
- ──────────────►  mic ──HTTPS──►  ASR → LLM → mkc build ──►  hex → BLE partial flash  ──►  new program runs
-                  (AI button)     → .hex + region hashes      progress UI + hash check
-```
-
 ![Solution view: the child speaks to the Mosaico, the build box turns it into an image, the image goes over BLE to the micro:bit](docs/architecture/solution.png)
 
 Every box in that picture is drawn from source, with the file and line range it came
 from recorded in the diagram's own JSON. [Interactive version][solution-html] ·
 [regenerate it](docs/architecture/README.md).
 
-Status: **PoC** — this repository currently validates the hard part of the chain
-(build a MakeCode hex with a pinned toolchain, extract the region geometry, flash
-it over BLE, verify it landed). Voice and LLM come next.
+Status: **PoC**, but the chain runs end to end — push-to-talk → `POST /v1/speak`
+(ASR → LLM → `mkc`) → region-2 bytes → BLE partial flash → region-2 verify. The
+Wi-Fi credentials and the service URL are compiled in at build time from `.env`, and
+a bench build can post a committed fixture WAV instead of using the microphone.
 
 ## Requirements
 

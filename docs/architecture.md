@@ -1,17 +1,9 @@
 # Architecture
 
-Four components, one of which is a box on the LAN. That is not a preference: the
+Five components, one of which is a box on the LAN. That is not a preference: the
 `.hex` can only be produced by MakeCode's compiler (`mkc` runs the released
 editor's compiler in node), so *something* with node and a network connection has
 to sit between the kid's request and the micro:bit.
-
-```
-   kid's voice                LAN box                       ESP-Mosaico (esp32s31)              micro:bit v1
- ───────────────►  mic ──HTTPS──►  POST /v1/speak            ──►  parse hex, slice region 2   ──BLE──►  partial-flash
-                   AI button      ASR → LLM → mkc build         pack 64-byte blocks                   service
-                                  → hex + region hashes         NimBLE central, notify-paced
-                                  (toolchain pinned)            GSP UI, progress, verdict
-```
 
 The same picture, rendered and source-cited: [solution view](architecture/solution.png)
 ([interactive](architecture/solution.html)) and [component view](architecture/components.png)
@@ -38,14 +30,16 @@ Build object:
   "sha256": "…",
   "template_hash": "8 hex bytes",
   "program_hash": "8 hex bytes",
-  "region2": { "start": 196608, "end": 244735 },
+  "region2": { "start": 226304, "end": 232448 },
   "toolchain_id": "mkc-<editor build>",
   "log": "compiler output tail"
 }
 ```
 
 The service returns the hashes because it parses the produced hex server-side: the
-device can then refuse a mismatched image before opening a BLE connection.
+device then compares the image's template hash against the board's region 1 **after
+connecting and before any write**, so a mismatch costs a BLE connection but never a
+block (`mb_ble_central.c` logs `reading region 1 hash before any write`).
 
 **Toolchain pinning is the load-bearing rule.** Partial flashing only accepts an
 image whose DAL hash matches the running firmware. `mkc` refreshes its editor
@@ -60,16 +54,18 @@ Device operations go through `mosaico.py` only.
 
 | Component | Responsibility |
 |---|---|
+| `mb_voice` | push-to-talk capture, `POST /v1/speak`, Wi-Fi wait |
+| `mb_build_client` | `POST /v1/build?region2=true`; region-2 bytes land in PSRAM |
 | `mb_payload` | Intel HEX → linear image, magic/hash extraction, region-2 64-byte blocks |
-| `mb_flash` | NimBLE central: scan, connect, CCCD, five opcodes, notify-paced blocking, resync |
-| `build_service_client` | HTTPS client; TLS allocations in PSRAM |
-| `app_studio` | State machine + GSP scene on the 480×480 panel |
+| `mb_ble_central` | NimBLE central: scan, connect, CCCD, notify-paced blocking, resync, verify |
+| `mb_flash` | the packet codec: `REGION_INFO`, `WRITE_DATA`, `END_OF_TX` |
+| `app_display` | BSP panel bring-up and screen mirroring |
+| `app_studio` | state machine + GSP scene on the 480×480 panel |
+| `mb_event` | the one event type the pipeline emits and the UI consumes |
 
 State machine — every state is a screen, not a log line:
-
-```
-IDLE → LISTENING → BUILDING → CONNECTING → FLASHING → VERIFYING → DONE | FAILED
-```
+[lifecycle diagram](architecture/lifecycle.png) ([interactive](architecture/lifecycle.html)),
+drawn from the transition table in `app_studio.c`.
 
 What the screens show, and why the chain is this short:
 
@@ -115,5 +111,8 @@ flash, so both get tested against the same fixtures.
 | Does it run? | The template renders a 2-character revision glyph at boot |
 | Is the toolchain still pinned? | `/v1/health` `toolchain_id` unchanged |
 
-A failed flash never leaves a half-written program: nothing is written until the
-build is valid, and an aborted transfer leaves the previous image in place.
+Nothing is written until the build is valid, and a write that is refused on the DAL
+hash costs only a BLE connection. An **aborted** transfer is the unsafe case: region 2
+is written in place, so a link that dies mid-stream leaves the board with a half-written
+program, no BLE service and no way back except one USB bootstrap. That is issue #15, not
+a theoretical risk — it is why the write is notify-paced and why the verify pass exists.
