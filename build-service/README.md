@@ -58,7 +58,7 @@ defaults so a second service on the same LAN box cannot collide with it.
 
 Measured values for the two PoC payloads: `TOOLCHAIN.md`.
 
-## `POST /v1/speak` — speech (or text) in, compiled image out
+## `POST /v1/speak`: speech (or text) in, compiled image out
 
 The voice entry point. Two content types:
 
@@ -77,5 +77,5 @@ One retry, with the compiler's own output fed back. If the second attempt also
 fails, the response is `502` carrying `transcript`, `source`, `attempts` and
 `compiler_message`, so the device can display the real error instead of "try
 again". The prompt forbids imports, packages and `pxt.json` changes, and
-requires a `REVISION` constant shown at boot — the DAL hash must not move, or
+requires a `REVISION` constant shown at boot. The DAL hash must not move, or
 the partial-flash service will refuse the image.

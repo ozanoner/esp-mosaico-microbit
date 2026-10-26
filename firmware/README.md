@@ -11,7 +11,7 @@ python3 mosaico.py iris system-update --project projects/microbit_studio
 python3 mosaico.py iris app-update   --project projects/microbit_studio
 ```
 
-Device operations go through `mosaico.py` only — no `idf.py flash`, no `esptool`
+Device operations go through `mosaico.py` only: no `idf.py flash`, no `esptool`
 offsets. The application lives in `main_app` (`app/ota_0`); the retained Vibe Mode
 firmware is untouched, so `recover` keeps working.
 
@@ -30,15 +30,15 @@ make firmware            # same thing, drops you into a shell
 
 ### Measured facts for the current image
 
-`espressif/idf@sha256:6ad927cf…` — the digest `compose.yaml` pins — carries IDF master
+`espressif/idf@sha256:6ad927cf…`, the digest `compose.yaml` pins, carries IDF master
 at revision `ab95e70748f2` (2026-10-12). Measured from `python3 mosaico.py doctor`
 inside that container:
 
 | Check | Result |
 |---|---|
-| `idf-version` | **6.2.0** (required ≥ 6.2) — pass |
-| `idf-target` | `esp32s31` available — pass |
-| `idf-revision` | `ab95e70748f2` — pass (not enforced) |
+| `idf-version` | **6.2.0** (required ≥ 6.2), pass |
+| `idf-target` | `esp32s31` available, pass |
+| `idf-revision` | `ab95e70748f2`, pass (not enforced) |
 | `esp-iris` | fails until the ESP-Iris host runtime is bootstrapped into the named volume |
 
 ⚠️ Upstream documents ESP-IDF `7b9cc1ac79f865983f59bb8ff3ff43eb74ff1dbe`
@@ -49,7 +49,7 @@ a tag at or below that revision before blaming our code.
 
 ## Application
 
-`projects/microbit_studio/` — created with the upstream template (names are
+`projects/microbit_studio/`, created with the upstream template (names are
 letters, digits and underscores only; hyphens are rejected):
 
 ```sh

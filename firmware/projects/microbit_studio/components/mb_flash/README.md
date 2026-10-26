@@ -6,7 +6,7 @@ device streams.
 
 ## What the device actually sends
 
-Only **region 2** — the user program. The SoftDevice and the DAL are already on
+Only **region 2**, the user program. The SoftDevice and the DAL are already on
 the micro:bit and are never transmitted, so the fixture is a few kilobytes
 instead of a 1.3 MB hex. Region 2 for the dice build is 4,096 bytes: 64 blocks.
 
@@ -24,7 +24,7 @@ a build-time mismatch rather than a mysterious refusal on the device.
 
 ## Wire format
 
-One 20-byte packet per ATT write, exactly the default MTU payload — no MTU
+One 20-byte packet per ATT write, exactly the default MTU payload, so no MTU
 exchange is needed:
 
 ```
@@ -48,7 +48,7 @@ two of them contradict earlier notes in this repo:
    block makes the device answer `0xAA` from the second block on.
 3. **`END_OF_TX` writes once more.** The device burns 16 bytes at its current
    offset with whatever is left in its block buffer, strips the embedded-source
-   magic, then resets — which is what drops the BLE connection.
+   magic, then resets, which is what drops the BLE connection.
 
 ## Testing
 

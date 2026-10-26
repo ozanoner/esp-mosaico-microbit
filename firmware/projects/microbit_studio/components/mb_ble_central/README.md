@@ -1,6 +1,6 @@
 # mb_ble_central
 
-NimBLE **central** for the micro:bit v1 partial-flash service — the firmware side
+NimBLE **central** for the micro:bit v1 partial-flash service, the firmware side
 of gates G2 and G3.
 
 ## What it does, in order
@@ -14,7 +14,7 @@ of gates G2 and G3.
    (program) hashes, refuses to write if the DAL differs from our image, streams
    region 2 in 64-byte blocks, sends `END_OF_TX`, and disconnects. The device
    resets itself, which drops the link.
-4. **Afterwards:** writes `0xEE` and logs the STATUS answer — that is the gate G2
+4. **Afterwards:** writes `0xEE` and logs the STATUS answer, which is the gate G2
    probe, kept as the steady state so the log stays readable after a flash.
 
 Each round ends in a disconnect and a fresh scan, so "twice without a reboot" is
@@ -33,7 +33,7 @@ corrupted flash.
 `REGION_INFO` for region 1 returns the DAL hash. If it differs from our image's
 `template_hash`, the firmware logs `DAL hash differs from our image: refusing to
 write` and disconnects. Streaming a mismatched DAL produces an image the device
-would refuse anyway, but only after writing 64 blocks — refusing first keeps the
+would refuse anyway, but only after writing 64 blocks. Refusing first keeps the
 failure at "we did not write".
 
 ## Resync

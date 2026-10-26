@@ -18,7 +18,7 @@ the Mosaico, and API keys for ASR/LLM never leave the box.
 
 | Endpoint | Body | Returns |
 |---|---|---|
-| `GET /v1/health` | — | `toolchain_id`, editor version, DAL hash pinned |
+| `GET /v1/health` | none | `toolchain_id`, editor version, DAL hash pinned |
 | `POST /v1/build` | `{ "source": "<main.ts>" }` | build object (below) |
 | `POST /v1/speak` | `audio/wav` (16 kHz mono, ≤15 s) | `transcript` + build object |
 
@@ -63,7 +63,7 @@ Device operations go through `mosaico.py` only.
 | `app_studio` | state machine + GSP scene on the 480×480 panel |
 | `mb_event` | the one event type the pipeline emits and the UI consumes |
 
-State machine — every state is a screen, not a log line:
+State machine: every state renders a screen.
 [lifecycle diagram](architecture/lifecycle.png) ([interactive](architecture/lifecycle.html)),
 drawn from the transition table in `app_studio.c`.
 
@@ -79,7 +79,7 @@ What the screens show, and why the chain is this short:
   line becomes "hold A+B, then tap reset" and the scan keeps running.
 - **FLASHING is five segments of 20 %.** The segment being written pulses at
   500 ms; finished segments stay solid. No block counts reach the screen.
-- **DONE shows the trophy clip only** — no success text.
+- **DONE shows the trophy clip only.** There is no success text.
 
 ### RAM budget
 
@@ -114,5 +114,5 @@ flash, so both get tested against the same fixtures.
 Nothing is written until the build is valid, and a write that is refused on the DAL
 hash costs only a BLE connection. An **aborted** transfer is the unsafe case: region 2
 is written in place, so a link that dies mid-stream leaves the board with a half-written
-program, no BLE service and no way back except one USB bootstrap. That is issue #15, not
-a theoretical risk — it is why the write is notify-paced and why the verify pass exists.
+program, no BLE service and no way back except one USB bootstrap. That is issue #15.
+It is why the write is notify-paced and why the verify pass exists.

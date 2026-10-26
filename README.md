@@ -175,12 +175,6 @@ USB bootstrap. The protocol reference, with the vendor sources it was read from,
 - [Bring-up gates](docs/bringup-gates.md)
 - [Reproducibility](docs/reproducibility.md)
 
-## Scope
-
-micro:bit **v1 (nRF51822)** only. The partial-flash service ships only in MakeCode-built
-images, so a board running MicroPython v1 has no BLE stack and needs one USB flash to
-bootstrap.
-
 ## Licence
 
 MIT. See [LICENSE](LICENSE).

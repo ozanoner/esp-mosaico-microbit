@@ -1,6 +1,6 @@
-# Third-party notices — app_studio
+# Third-party notices: app_studio
 
-## Artwork — `ui/assets/`
+## Artwork: `ui/assets/`
 
 | File | Origin |
 |---|---|
@@ -21,9 +21,9 @@ compatibility. The Foundation's name and marks are trademarks of the Micro:bit
 Educational Foundation; this project is not affiliated with or endorsed by the
 Foundation.
 
-## Fonts — `ui/fonts/`
+## Fonts: `ui/fonts/`
 
 | File | Source | Licence |
 |---|---|---|
-| `Fredoka-Medium.ttf`, `Fredoka-SemiBold.ttf` | `github.com/google/fonts/ofl/fredoka`, static instances cut from `Fredoka[wdth,wght].ttf` at `wght=500` and `wght=600`, `wdth=100` | SIL Open Font License 1.1 — see `ui/fonts/OFL.txt` |
+| `Fredoka-Medium.ttf`, `Fredoka-SemiBold.ttf` | `github.com/google/fonts/ofl/fredoka`, static instances cut from `Fredoka[wdth,wght].ttf` at `wght=500` and `wght=600`, `wdth=100` | SIL Open Font License 1.1, see `ui/fonts/OFL.txt` |
 | `DejaVuSans.ttf`, `DejaVuSans-Bold.ttf` | carried over unchanged from the hello scene; they set the ESP-MOSAICO header | see `ui/fonts/LICENSE` |

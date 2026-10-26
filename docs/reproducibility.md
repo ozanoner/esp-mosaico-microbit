@@ -7,7 +7,7 @@ Goal: `git clone` → `make verify` → same bytes, on any machine with Docker.
 | Thing | Pinned by | File |
 |---|---|---|
 | MakeCode compiler (`mkc`) | exact npm version `1.3.6`, lockfile, `npm ci` | `build-service/package.json`, `build-service/package-lock.json` |
-| MakeCode editor worker | downloaded from the CDN at **image-build time** and frozen into the image (`/root/.pxt`) — not version-pinned, so it is only as fixed as the last image build | `build-service/Dockerfile` |
+| MakeCode editor worker | downloaded from the CDN at **image-build time** and frozen into the image (`/root/.pxt`), not version-pinned, so it is only as fixed as the last image build | `build-service/Dockerfile` |
 | Python dependencies | frozen lock, `uv sync --frozen` | `build-service/uv.lock` |
 | Node base image | digest | `build-service/Dockerfile` |
 | ESP-IDF toolchain | image digest | `compose.yaml` |
@@ -47,7 +47,7 @@ make clean
 
 The gate runs at the release, not on every push: PR feedback stays fast, and a cold
 Docker build on each push buys little. The trigger is
-`.github/workflows/verify-release.yml` — `release: types: [published]` and
+`.github/workflows/verify-release.yml`, triggered by `release: types: [published]` and
 `workflow_dispatch` only, deliberately no `push` and no `pull_request`.
 
 Before a tag, in this order:
@@ -56,7 +56,7 @@ Before a tag, in this order:
    cannot see the board. Confirm G2 (the partial-flash service answers `0xEE` in
    application mode), G3 (`REGION_INFO` regions 1/2 equal the hashes from our hex)
    and G4 (a generated image runs, and region 2 still matches after the reboot).
-   The revision glyph on the LED matrix is a human check — nothing on the host can
+   The revision glyph on the LED matrix is a human check, because nothing on the host can
    read it. See [bring-up gates](bringup-gates.md).
 2. **Bump the version and tag it in one command:**
    `tools/release/version.py bump minor --tag --push`. It raises the
@@ -70,9 +70,9 @@ Before a tag, in this order:
    rebuild `hello.ts`, compare against the golden file), then the same `verify`
    again inside `--network none` so an accidental runtime download fails it.
 4. **Read the job output.** It uploads `build/hello.hex` and the verify log, and a
-   failure names the field that moved — `template_hash`, `program_hash`, region
-   geometry or the region-2 bytes — so the fix is either a real regression or a
-   deliberate pin refresh (below), never a quietly updated golden file.
+   failure names the field that moved (`template_hash`, `program_hash`, region
+   geometry or the region-2 bytes), so the fix is either a real regression or a
+   deliberate pin refresh (below). The golden file is not quietly updated.
 
 The version lives in one line: `project(microbit_studio VERSION …)` in
 `firmware/projects/microbit_studio/CMakeLists.txt`, because that is the line ESP-Iris
@@ -86,7 +86,7 @@ different number, which is how a stale `build/sdkconfig` gets caught.
 ## Refreshing the pin (deliberate upgrade)
 
 1. Change the version in `build-service/package.json`, run `npm install --package-lock-only`.
-2. `make verify` — it will fail and print the new hashes.
+2. `make verify`. It fails and prints the new hashes.
 3. Update `microbit/golden/expected.json` **and** `build-service/TOOLCHAIN.md` in the same
    commit, and say in the message that the toolchain moved.
 4. Re-bootstrap the micro:bit over USB: a new DAL means partial flashing will
